@@ -1,0 +1,20 @@
+ati_axia80_m20:
+  master_index: 0
+  slave_position: 0
+  slave_alias: 0
+  vendor_id: 0x00000732
+  product_code: 0x26483053
+  revision: 0x00000001
+
+  # Preferred: read these from SDO 0x2021:0x37/0x38 during activation.
+  read_calibration_sdo: true
+  counts_per_force: 1000000
+  counts_per_torque: 1000000
+
+  # Control 1 bit fields from the ATI manual.
+  # sample_rate_code: 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz.
+  filter_selection: 0
+  calibration_slot: 0
+  sample_rate_code: 0
+  clear_bias_on_activate: false
+  set_bias_on_activate: false
