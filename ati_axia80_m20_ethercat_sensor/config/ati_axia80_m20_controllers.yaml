@@ -1,0 +1,11 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500
+
+    ati_axia80_m20_broadcaster:
+      type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster
+
+ati_axia80_m20_broadcaster:
+  ros__parameters:
+    sensor_name: ati_axia80_m20
+    frame_id: ati_axia80_m20_link
