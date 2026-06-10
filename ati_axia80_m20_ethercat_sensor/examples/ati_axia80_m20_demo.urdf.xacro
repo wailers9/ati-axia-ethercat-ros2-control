@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<robot name="ati_axia80_m20_demo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:arg name="master_index" default="0"/>
+  <xacro:arg name="slave_position" default="0"/>
+  <xacro:arg name="slave_alias" default="0"/>
+  <xacro:arg name="parent" default="tool0"/>
+
+  <link name="$(arg parent)"/>
+
+  <xacro:include filename="$(find ati_axia80_m20_ethercat_sensor)/urdf/ati_axia80_m20_ethercat_sensor.xacro"/>
+
+  <xacro:ati_axia80_m20_ethercat_sensor
+    name="ati_axia80_m20"
+    parent="$(arg parent)"
+    master_index="$(arg master_index)"
+    slave_position="$(arg slave_position)"
+    slave_alias="$(arg slave_alias)"/>
+</robot>
