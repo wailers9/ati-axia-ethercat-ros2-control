@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="ati_axia80_m20_ethercat_sensor"
+               params="name:=ati_axia80_m20 parent:=tool0 master_index:=0 slave_position:=0 slave_alias:=0">
+    <link name="${name}_link"/>
+
+    <joint name="${name}_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${name}_link"/>
+    </joint>
+
+    <ros2_control name="${name}_hardware" type="sensor">
+      <hardware>
+        <plugin>ati_axia80_m20_ethercat_sensor/Axia80M20EtherCATSensor</plugin>
+      </hardware>
+      <sensor name="${name}">
+        <param name="master_index">${master_index}</param>
+        <param name="slave_position">${slave_position}</param>
+        <param name="slave_alias">${slave_alias}</param>
+        <param name="vendor_id">0x00000732</param>
+        <param name="product_code">0x26483053</param>
+        <param name="revision">0x00000001</param>
+
+        <!-- Prefer SDO calibration. Set false and fill values manually if SDO is unavailable. -->
+        <param name="read_calibration_sdo">true</param>
+        <param name="counts_per_force">1000000</param>
+        <param name="counts_per_torque">1000000</param>
+
+        <!-- Control 1 bits: filter 0..8, calibration slot 0..1, sample rate 0..3. -->
+        <param name="filter_selection">0</param>
+        <param name="calibration_slot">0</param>
+        <param name="sample_rate_code">0</param>
+        <param name="clear_bias_on_activate">false</param>
+        <param name="set_bias_on_activate">false</param>
+
+        <state_interface name="timestamp.sec"/>
+        <state_interface name="timestamp.nanosec"/>
+        <state_interface name="force.x"/>
+        <state_interface name="force.y"/>
+        <state_interface name="force.z"/>
+        <state_interface name="torque.x"/>
+        <state_interface name="torque.y"/>
+        <state_interface name="torque.z"/>
+        <state_interface name="status_code"/>
+        <state_interface name="sample_counter"/>
+      </sensor>
+    </ros2_control>
+  </xacro:macro>
+</robot>
