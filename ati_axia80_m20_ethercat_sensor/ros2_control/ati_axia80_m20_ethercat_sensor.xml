@@ -1,0 +1,10 @@
+<library path="ati_axia80_m20_ethercat_sensor">
+  <class
+    name="ati_axia80_m20_ethercat_sensor/Axia80M20EtherCATSensor"
+    type="ati_axia80_m20_ethercat_sensor::Axia80M20EtherCATSensor"
+    base_class_type="hardware_interface::SensorInterface">
+    <description>
+      ros2_control sensor plugin for ATI Axia80-M20 force/torque sensor over EtherCAT.
+    </description>
+  </class>
+</library>
