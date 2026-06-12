@@ -71,8 +71,51 @@ source install/setup.bash
 
 ## EtherCAT 准备
 
-请在你的机器上按实际网卡配置 IgH/EtherLab master。不要直接复制其他机器的
-网卡地址；应使用本机连接传感器的 EtherCAT 网口。
+需要先把 IgH/EtherLab master 绑定到本机连接 ATI 传感器的 EtherCAT 网口。
+项目不会也不应该写死任何人的网卡地址；你需要在自己的机器上查出网口信息后填写。
+
+需要确认和填写的信息：
+
+| 信息 | 填写位置 | 说明 |
+| --- | --- | --- |
+| EtherCAT 网卡 MAC 地址 | `/etc/ethercat.conf` 的 `MASTER0_DEVICE` | 使用本机连接传感器的有线网口，不要使用 Wi-Fi、外网网口或别人机器的 MAC |
+| EtherCAT 驱动模块 | `/etc/ethercat.conf` 的 `DEVICE_MODULES` | 常见值是 `generic`，如使用专用驱动请按你的 EtherCAT master 安装说明填写 |
+| master index | launch 参数 `master_index` / xacro 参数 `master_index` | 第一个 master 通常是 `0` |
+| slave position | launch 参数 `slave_position` / xacro 参数 `slave_position` | ATI 传感器在 EtherCAT 总线中的从站位置，通常单个从站时是 `0` |
+| slave alias | launch 参数 `slave_alias` / xacro 参数 `slave_alias` | 未配置 EtherCAT alias 时使用 `0` |
+
+查找本机网卡：
+
+```bash
+ip link
+```
+
+找到连接 ATI 传感器的有线网卡名，例如 `enp3s0`。查看该网卡 MAC 地址：
+
+```bash
+ip link show enp3s0
+```
+
+输出中的 `link/ether` 后面就是要填入 `MASTER0_DEVICE` 的 MAC 地址。
+
+编辑 EtherCAT master 配置：
+
+```bash
+sudo nano /etc/ethercat.conf
+```
+
+配置格式示例：
+
+```bash
+MASTER0_DEVICE="<你的 EtherCAT 网卡 MAC 地址>"
+DEVICE_MODULES="generic"
+```
+
+保存后重启 EtherCAT 服务：
+
+```bash
+sudo systemctl restart ethercat
+```
 
 常用检查命令：
 
@@ -84,6 +127,15 @@ ethercat slaves
 
 连接传感器并启动 EtherCAT master 后，`ethercat slaves` 应能看到 ATI Axia
 从站。如果没有从站，ROS 2 硬件激活会失败，后续不会发布有效力数据。
+
+如果有多个 EtherCAT 从站，用下面的命令确认传感器位置：
+
+```bash
+ethercat slaves
+```
+
+输出列表中的顺序位置就是 `slave_position`。例如传感器是第一个从站，通常填
+`slave_position:=0`。
 
 ## 使用插件
 
@@ -122,6 +174,12 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_demo.launch.py \
 - `master_index`：IgH/EtherLab master index，通常从 `0` 开始。
 - `slave_position`：传感器在 EtherCAT 总线中的位置。
 - `slave_alias`：EtherCAT alias，未配置 alias 时使用 `0`。
+
+这三个参数和 `/etc/ethercat.conf` 的关系：
+
+- `/etc/ethercat.conf` 决定 IgH/EtherLab master 使用哪块本机网卡。
+- `master_index` 决定 ROS 2 插件请求哪个 IgH/EtherLab master。
+- `slave_position` / `slave_alias` 决定插件在该 master 下连接哪个 ATI Axia 从站。
 
 ## 获取力/力矩 Topic
 
