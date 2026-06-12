@@ -1,73 +1,40 @@
 # ATI Axia80-M20 EtherCAT ros2_control Sensor
 
-本包提供一个 ROS 2 Jazzy `hardware_interface::SensorInterface` 插件，用于通过
-IgH/EtherLab EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器。
+这是一个 ROS 2 Jazzy `ros2_control` 传感器插件，用于通过 IgH/EtherLab
+EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
+`force_torque_sensor_broadcaster` 发布 `geometry_msgs/msg/WrenchStamped` topic。
 
-实现分为两层：
+## 功能
 
-- ROS 2 Control 插件层：参考 `on-robot-ft-sensor` 的硬件接口组织方式。
-- EtherCAT 驱动层：参考 `staman_robotiq_3f_gripper_lib-main` 的 IgH/EtherLab 调用方式。
-
-## 项目结构
-
-```text
-ati_axia80_m20_ethercat_sensor/
-├── CMakeLists.txt
-├── package.xml
-├── README.md
-├── config/
-│   └── ati_axia80_m20_controllers.yaml
-├── examples/
-│   └── ati_axia80_m20_demo.urdf.xacro
-├── include/ati_axia80_m20_ethercat_sensor/
-│   ├── axia80_ethercat_config.hpp
-│   ├── axia80_ethercat_driver.hpp
-│   └── axia80_m20_ethercat_sensor.hpp
-├── launch/
-│   └── ati_axia80_m20_demo.launch.py
-├── ros2_control/
-│   ├── ati_axia80_m20_ethercat_sensor.xml
-│   └── ati_axia80_m20_params.yaml
-├── src/
-│   ├── axia80_ethercat_config.cpp
-│   ├── axia80_ethercat_driver.cpp
-│   └── axia80_m20_ethercat_sensor.cpp
-└── urdf/
-    └── ati_axia80_m20_ethercat_sensor.xacro
-```
-
-## 当前能做什么
-
-- 作为 ros2_control sensor hardware plugin 被 `controller_manager` 加载。
-- 使用 IgH/EtherLab `ecrt.h` API 请求 EtherCAT master。
+- 作为 `hardware_interface::SensorInterface` 被 `controller_manager` 加载。
+- 通过 IgH/EtherLab `ecrt.h` API 与 EtherCAT master 通讯。
 - 按 Vendor ID、Product Code、alias、position 查找 ATI Axia 从站。
-- 配置 Axia EtherCAT PDO。
-- 从 PDO 周期读取：
+- 配置 Axia EtherCAT PDO 并读取：
   - `Fx/Fy/Fz`
   - `Tx/Ty/Tz`
   - `status_code`
   - `sample_counter`
-- 可选读取 SDO 标定比例：
-  - `0x2021:0x37` counts per force
-  - `0x2021:0x38` counts per torque
-- 支持 `set_bias_on_activate` / `clear_bias_on_activate` 启动时 bias 控制。
+- 可选从 SDO `0x2021:0x37` / `0x2021:0x38` 读取 force/torque 缩放比例。
+- 防止 `counts_per_force` 和 `counts_per_torque` 为 0 或无效值导致除零。
 - 提供手动 bias 服务：
   - `/ati_axia80_m20/set_bias`
   - `/ati_axia80_m20/clear_bias`
-- 提供最小 demo launch，启动 `ros2_control_node` 和
-  `force_torque_sensor_broadcaster`。
 
 ## 依赖
 
-需要已安装：
+需要先安装：
 
 - ROS 2 Jazzy
-- ros2_control 相关包
+- `ros2_control`
+- `ros2_controllers`
+- `controller_manager`
+- `force_torque_sensor_broadcaster`
+- `robot_state_publisher`
+- `xacro`
 - IgH/EtherLab EtherCAT master
 - IgH/EtherLab 开发文件：`ecrt.h`、`libethercat.so`
-- xacro
 
-常用安装命令：
+ROS 依赖安装示例：
 
 ```bash
 sudo apt-get install -y \
@@ -79,108 +46,46 @@ sudo apt-get install -y \
   ros-jazzy-xacro
 ```
 
-IgH/EtherLab master 和开发库需要按本机环境单独安装。
+EtherCAT master 和开发库的安装方式取决于你的系统环境。确认 `ecrt.h` 和
+`libethercat.so` 能被 CMake 找到后再构建本包。
 
-## EtherCAT Master 配置
+## 克隆和构建
 
-当前项目按以下网卡配置：
+在 ROS 2 workspace 的 `src` 目录中克隆：
 
 ```bash
-MASTER0_DEVICE="00:0c:29:ce:81:6d"
-DEVICE_MODULES="generic"
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+git clone https://github.com/wailers9/ati-axia-ethercat-ros2-control.git
 ```
 
-配置文件通常是：
+构建：
 
 ```bash
-/etc/ethercat.conf
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install --packages-select ati_axia80_m20_ethercat_sensor --cmake-args -DCMAKE_BUILD_TYPE=Release
+source install/setup.bash
 ```
 
-修改前应先备份：
+## EtherCAT 准备
+
+请在你的机器上按实际网卡配置 IgH/EtherLab master。不要直接复制其他机器的
+网卡地址；应使用本机连接传感器的 EtherCAT 网口。
+
+常用检查命令：
 
 ```bash
-sudo cp -a /etc/ethercat.conf /etc/ethercat.conf.bak.$(date +%Y%m%d-%H%M%S)
-```
-
-修改后启动服务：
-
-```bash
-sudo systemctl enable ethercat
-sudo systemctl restart ethercat
-```
-
-检查 master：
-
-```bash
-grep -E '^(MASTER0_DEVICE|DEVICE_MODULES)=' /etc/ethercat.conf
 systemctl status ethercat --no-pager
 ethercat master
 ethercat slaves
 ```
 
-没有连接真实传感器时，`ethercat slaves` 没有输出或 `Slaves: 0` 是正常的。
+连接传感器并启动 EtherCAT master 后，`ethercat slaves` 应能看到 ATI Axia
+从站。如果没有从站，ROS 2 硬件激活会失败，后续不会发布有效力数据。
 
-## 构建
-
-在 workspace 根目录执行：
-
-```bash
-source /opt/ros/jazzy/setup.bash
-rosdep install --from-paths ati_axia80_m20_ethercat_sensor --ignore-src -r -y
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-source install/setup.bash
-```
-
-当前已验证：
-
-```bash
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-```
-
-可以成功构建本包和参考包。
-
-## 快速验证
-
-验证 xacro 能正常展开：
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-xacro install/ati_axia80_m20_ethercat_sensor/share/ati_axia80_m20_ethercat_sensor/examples/ati_axia80_m20_demo.urdf.xacro
-```
-
-验证 launch 参数：
-
-```bash
-ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_demo.launch.py --show-args
-```
-
-## 运行 Demo
-
-接上传感器后运行：
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-
-ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_demo.launch.py \
-  master_index:=0 \
-  slave_position:=0 \
-  slave_alias:=0
-```
-
-如果没有真实从站，启动到硬件激活阶段会报找不到 ATI Axia EtherCAT slave，
-这是预期结果。
-
-运行后可检查：
-
-```bash
-ros2 control list_hardware_interfaces
-ros2 topic list
-ros2 topic echo /ati_axia80_m20_broadcaster/wrench
-```
-
-## ros2_control 插件
+## 使用插件
 
 插件导出名：
 
@@ -188,36 +93,109 @@ ros2 topic echo /ati_axia80_m20_broadcaster/wrench
 ati_axia80_m20_ethercat_sensor/Axia80M20EtherCATSensor
 ```
 
-插件描述文件：
+可直接复用：
 
 ```text
-ros2_control/ati_axia80_m20_ethercat_sensor.xml
+ati_axia80_m20_ethercat_sensor/urdf/ati_axia80_m20_ethercat_sensor.xacro
 ```
 
-可复用 xacro：
+demo URDF 位于：
 
 ```text
-urdf/ati_axia80_m20_ethercat_sensor.xacro
+ati_axia80_m20_ethercat_sensor/examples/ati_axia80_m20_demo.urdf.xacro
 ```
 
-## State Interfaces
+启动 demo：
 
-本插件导出以下状态接口：
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_demo.launch.py \
+  master_index:=0 \
+  slave_position:=0 \
+  slave_alias:=0
+```
+
+参数说明：
+
+- `master_index`：IgH/EtherLab master index，通常从 `0` 开始。
+- `slave_position`：传感器在 EtherCAT 总线中的位置。
+- `slave_alias`：EtherCAT alias，未配置 alias 时使用 `0`。
+
+## 获取力/力矩 Topic
+
+demo launch 会启动：
+
+- `ros2_control_node`
+- `robot_state_publisher`
+- `force_torque_sensor_broadcaster`
+
+力/力矩 topic：
 
 ```text
-ati_axia80_m20/timestamp.sec
-ati_axia80_m20/timestamp.nanosec
+/ati_axia80_m20_broadcaster/wrench
+```
+
+查看 topic：
+
+```bash
+ros2 topic list
+ros2 topic echo /ati_axia80_m20_broadcaster/wrench
+```
+
+检查硬件接口和 controller 状态：
+
+```bash
+ros2 control list_hardware_interfaces
+ros2 control list_controllers
+```
+
+`force_torque_sensor_broadcaster` 会读取以下 state interfaces 并发布 wrench：
+
+```text
 ati_axia80_m20/force.x
 ati_axia80_m20/force.y
 ati_axia80_m20/force.z
 ati_axia80_m20/torque.x
 ati_axia80_m20/torque.y
 ati_axia80_m20/torque.z
+```
+
+插件还导出：
+
+```text
+ati_axia80_m20/timestamp.sec
+ati_axia80_m20/timestamp.nanosec
 ati_axia80_m20/status_code
 ati_axia80_m20/sample_counter
 ```
 
-`force_torque_sensor_broadcaster` 使用 `force.*` 和 `torque.*` 发布 wrench。
+## 手动归零和取消归零
+
+传感器硬件 active 后，可以使用 `std_srvs/srv/Trigger` 服务手动控制 bias。
+
+手动归零：
+
+```bash
+ros2 service call /ati_axia80_m20/set_bias std_srvs/srv/Trigger '{}'
+```
+
+取消归零：
+
+```bash
+ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
+```
+
+建议流程：
+
+1. 启动系统并等待传感器稳定。
+2. 确认传感器处于期望的零点受力状态。
+3. 调用 `/ati_axia80_m20/set_bias`。
+4. 用 `/ati_axia80_m20_broadcaster/wrench` 确认输出。
+5. 如需恢复未 bias 的输出，调用 `/ati_axia80_m20/clear_bias`。
+
+如果驱动尚未配置或硬件未 active，服务会返回 `success=false` 和错误信息。
 
 ## 主要参数
 
@@ -231,44 +209,44 @@ ati_axia80_m20/sample_counter
 | `vendor_id` | `0x00000732` | ATI Vendor ID |
 | `product_code` | `0x26483053` | Axia EtherCAT Product Code |
 | `revision` | `0x00000001` | Revision |
-| `read_calibration_sdo` | `true` | 启动时读取 SDO 标定比例 |
+| `read_calibration_sdo` | `true` | 激活时读取 SDO 标定比例 |
 | `counts_per_force` | `1000000` | 手动 force 缩放比例 |
 | `counts_per_torque` | `1000000` | 手动 torque 缩放比例 |
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
 | `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
-| `set_bias_on_activate` | `false` | 激活时设置 bias；默认关闭，避免传感器未稳定时设零点 |
+| `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 
-如果现场 SDO 读取失败，可先把：
+默认不启用 `set_bias_on_activate`，避免传感器刚启动未稳定时自动设置零点。
+
+如果现场 SDO 读取失败，可设置：
 
 ```xml
 <param name="read_calibration_sdo">false</param>
 ```
 
-然后手动填写 `counts_per_force` 和 `counts_per_torque`。
-这两个比例必须是有限正数，不能为 0。
+然后手动填写 `counts_per_force` 和 `counts_per_torque`。这两个值必须是有限正数，
+不能为 0。
 
-## 手动 Bias 控制
+## 在自己的机器人描述中使用
 
-硬件激活后，可以用 `std_srvs/srv/Trigger` 服务手动归零或取消归零：
+在你的机器人 xacro 中 include 本包的 xacro：
 
-```bash
-ros2 service call /ati_axia80_m20/set_bias std_srvs/srv/Trigger '{}'
-ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
+```xml
+<xacro:include filename="$(find ati_axia80_m20_ethercat_sensor)/urdf/ati_axia80_m20_ethercat_sensor.xacro"/>
+
+<xacro:ati_axia80_m20_ethercat_sensor
+  name="ati_axia80_m20"
+  parent="tool0"
+  master_index="0"
+  slave_position="0"
+  slave_alias="0"/>
 ```
 
-建议流程：
-
-1. 启动 demo，等待传感器稳定且无外载。
-2. 调用 `/ati_axia80_m20/set_bias` 手动归零。
-3. 如果需要恢复未 bias 的原始输出，调用 `/ati_axia80_m20/clear_bias`。
-
-如果驱动尚未配置或硬件未 active，服务会返回 `success=false` 和错误信息。
+如果你的末端 link 不是 `tool0`，请把 `parent` 改成实际 link 名称。
 
 ## PDO 映射
-
-PDO 布局来自 `200807 - ATI Axia EtherCAT FT.xml`。
 
 RxPDO `0x1601`：
 
@@ -290,43 +268,12 @@ TxPDO `0x1A00`：
 0x6020:00 Sample counter
 ```
 
-## 排障
+## 常见问题
 
-检查 EtherCAT 服务：
-
-```bash
-systemctl status ethercat --no-pager
-journalctl -u ethercat --no-pager -n 80
-```
-
-检查 master 和从站：
-
-```bash
-ethercat master
-ethercat slaves
-```
-
-检查内核模块：
-
-```bash
-lsmod | grep -i ethercat
-dmesg | grep -i ethercat | tail -50
-```
-
-如果 `dmesg` 显示权限不足，需要在本机终端使用 `sudo dmesg`。
-
-常见情况：
-
-- `Slaves: 0`：未连接传感器、线缆/供电问题、网卡不是实际 EtherCAT 网口。
-- `Frame loss 100%`：没有从站回复时正常；接上传感器后应下降。
-- `failed to request EtherCAT master`：服务未启动，或当前用户没有访问权限。
-- `ATI Axia EtherCAT slave was not found`：master 工作但未扫描到匹配 Vendor/Product/position。
-- SDO 读取失败：先设置 `read_calibration_sdo=false`，使用手动缩放比例验证 PDO 通讯。
-
-## 当前状态
-
-- EtherCAT master 已配置到 `00:0c:29:ce:81:6d`。
-- `ethercat.service` 已能启动。
-- 未连接真实 ATI Axia80-M20 时，从站数量为 0 是正常状态。
-- 包已通过 ROS 2 Jazzy 构建。
-- `xacro` 已安装并验证 demo URDF 可展开。
+- `ATI Axia EtherCAT slave was not found`：检查 EtherCAT master、线缆、供电、
+  `slave_position`、Vendor ID 和 Product Code。
+- 没有 `/ati_axia80_m20_broadcaster/wrench`：检查 controller 是否 loaded/active。
+- topic 存在但没有有效数据：检查硬件是否 active，以及 `ethercat slaves` 是否能看到传感器。
+- SDO 读取失败：将 `read_calibration_sdo` 设为 `false`，手动填写
+  `counts_per_force` 和 `counts_per_torque` 后再测试 PDO 通讯。
+- `failed to request EtherCAT master`：检查 EtherCAT 服务是否启动，以及当前用户是否有权限访问 master。
