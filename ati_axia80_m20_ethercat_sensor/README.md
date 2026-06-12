@@ -50,7 +50,10 @@ ati_axia80_m20_ethercat_sensor/
 - 可选读取 SDO 标定比例：
   - `0x2021:0x37` counts per force
   - `0x2021:0x38` counts per torque
-- 支持 `set_bias_on_activate` / `clear_bias_on_activate` 启动时置零控制。
+- 支持 `set_bias_on_activate` / `clear_bias_on_activate` 启动时 bias 控制。
+- 提供手动 bias 服务：
+  - `/ati_axia80_m20/set_bias`
+  - `/ati_axia80_m20/clear_bias`
 - 提供最小 demo launch，启动 `ros2_control_node` 和
   `force_torque_sensor_broadcaster`。
 
@@ -234,8 +237,8 @@ ati_axia80_m20/sample_counter
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
-| `clear_bias_on_activate` | `false` | 激活时清除 bias |
-| `set_bias_on_activate` | `false` | 激活时设置 bias |
+| `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
+| `set_bias_on_activate` | `false` | 激活时设置 bias；默认关闭，避免传感器未稳定时设零点 |
 
 如果现场 SDO 读取失败，可先把：
 
@@ -244,6 +247,24 @@ ati_axia80_m20/sample_counter
 ```
 
 然后手动填写 `counts_per_force` 和 `counts_per_torque`。
+这两个比例必须是有限正数，不能为 0。
+
+## 手动 Bias 控制
+
+硬件激活后，可以用 `std_srvs/srv/Trigger` 服务手动归零或取消归零：
+
+```bash
+ros2 service call /ati_axia80_m20/set_bias std_srvs/srv/Trigger '{}'
+ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
+```
+
+建议流程：
+
+1. 启动 demo，等待传感器稳定且无外载。
+2. 调用 `/ati_axia80_m20/set_bias` 手动归零。
+3. 如果需要恢复未 bias 的原始输出，调用 `/ati_axia80_m20/clear_bias`。
+
+如果驱动尚未配置或硬件未 active，服务会返回 `success=false` 和错误信息。
 
 ## PDO 映射
 

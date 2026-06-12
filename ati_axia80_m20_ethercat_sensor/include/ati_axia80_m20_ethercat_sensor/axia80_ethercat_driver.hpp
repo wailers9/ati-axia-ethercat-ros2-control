@@ -37,7 +37,7 @@ struct Axia80DriverParameters
   uint8_t sample_rate_code{0};    // 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz.
 
   bool set_bias_on_activate{false};
-  bool clear_bias_on_activate{false};
+  bool clear_bias_on_activate{true};
 };
 
 class Axia80EtherCATDriver
@@ -53,6 +53,7 @@ public:
   void shutdown();
   void set_bias();
   void clear_bias();
+  bool is_active() const;
   Axia80Sample read_once();
 
 private:
@@ -65,7 +66,7 @@ private:
   void cycle_once_();
   void pulse_control_bit_(uint32_t bit_mask);
   uint32_t control_word_() const;
-  int32_t upload_sdo_i32_(uint16_t index, uint8_t subindex) const;
+  uint32_t upload_sdo_u32_(uint16_t index, uint8_t subindex) const;
 
   Axia80DriverParameters parameters_;
   ec_master_t * master_{nullptr};

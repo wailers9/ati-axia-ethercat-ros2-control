@@ -1,6 +1,7 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_ethercat_driver.hpp"
 
 #include <array>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -22,19 +23,27 @@ void prefault_stack()
   std::memset(dummy, 0, MAX_SAFE_STACK);
 }
 
-int32_t le_i32(const uint8_t * data)
+uint32_t le_u32(const uint8_t * data)
 {
-  uint32_t raw = static_cast<uint32_t>(data[0]) |
+  return static_cast<uint32_t>(data[0]) |
     (static_cast<uint32_t>(data[1]) << 8) |
     (static_cast<uint32_t>(data[2]) << 16) |
     (static_cast<uint32_t>(data[3]) << 24);
-  return static_cast<int32_t>(raw);
+}
+
+void validate_scale(const std::string & name, double value)
+{
+  if (!std::isfinite(value) || value <= 0.0) {
+    throw std::runtime_error(name + " must be a finite positive value");
+  }
 }
 }  // namespace
 
 Axia80EtherCATDriver::Axia80EtherCATDriver(const Axia80DriverParameters & parameters)
 : parameters_(parameters), logger_(rclcpp::get_logger("Axia80EtherCATDriver"))
 {
+  validate_scale("counts_per_force", parameters_.counts_per_force);
+  validate_scale("counts_per_torque", parameters_.counts_per_torque);
 }
 
 Axia80EtherCATDriver::~Axia80EtherCATDriver()
@@ -89,11 +98,18 @@ void Axia80EtherCATDriver::clear_bias()
   pulse_control_bit_(CONTROL_CLEAR_BIAS);
 }
 
+bool Axia80EtherCATDriver::is_active() const
+{
+  return active_ && domain_pd_ != nullptr;
+}
+
 Axia80Sample Axia80EtherCATDriver::read_once()
 {
-  if (!active_ || !domain_pd_) {
+  if (!is_active()) {
     throw std::runtime_error("EtherCAT driver is not active");
   }
+  validate_scale("counts_per_force", parameters_.counts_per_force);
+  validate_scale("counts_per_torque", parameters_.counts_per_torque);
 
   ecrt_master_receive(master_);
   ecrt_domain_process(domain_);
@@ -204,13 +220,12 @@ void Axia80EtherCATDriver::configure_pdos_()
 void Axia80EtherCATDriver::read_calibration_sdo_()
 {
   parameters_.counts_per_force = static_cast<double>(
-    upload_sdo_i32_(OBJ_CALIBRATION, SUB_COUNTS_PER_FORCE));
+    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_FORCE));
   parameters_.counts_per_torque = static_cast<double>(
-    upload_sdo_i32_(OBJ_CALIBRATION, SUB_COUNTS_PER_TORQUE));
+    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_TORQUE));
 
-  if (parameters_.counts_per_force <= 0.0 || parameters_.counts_per_torque <= 0.0) {
-    throw std::runtime_error("invalid calibration counts read from Axia SDO 0x2021");
-  }
+  validate_scale("counts_per_force read from Axia SDO 0x2021:0x37", parameters_.counts_per_force);
+  validate_scale("counts_per_torque read from Axia SDO 0x2021:0x38", parameters_.counts_per_torque);
 
   RCLCPP_INFO(
     logger_,
@@ -247,7 +262,7 @@ void Axia80EtherCATDriver::cycle_once_()
 
 void Axia80EtherCATDriver::pulse_control_bit_(uint32_t bit_mask)
 {
-  if (!active_ || !domain_pd_) {
+  if (!is_active()) {
     throw std::runtime_error("cannot pulse control bit before EtherCAT activation");
   }
 
@@ -266,7 +281,7 @@ uint32_t Axia80EtherCATDriver::control_word_() const
   return word;
 }
 
-int32_t Axia80EtherCATDriver::upload_sdo_i32_(uint16_t index, uint8_t subindex) const
+uint32_t Axia80EtherCATDriver::upload_sdo_u32_(uint16_t index, uint8_t subindex) const
 {
   std::array<uint8_t, 4> data{};
   size_t result_size = 0;
@@ -279,7 +294,7 @@ int32_t Axia80EtherCATDriver::upload_sdo_i32_(uint16_t index, uint8_t subindex) 
       "failed SDO upload 0x" + std::to_string(index) + ":" + std::to_string(subindex) +
       " abort_code=" + std::to_string(abort_code));
   }
-  return le_i32(data.data());
+  return le_u32(data.data());
 }
 
 }  // namespace ati_axia80_m20_ethercat_sensor

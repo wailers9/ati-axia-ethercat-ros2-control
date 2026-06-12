@@ -1,5 +1,6 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_m20_ethercat_sensor.hpp"
 
+#include <cmath>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -68,7 +69,9 @@ hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_configure(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   try {
+    std::lock_guard<std::mutex> lock(driver_mutex_);
     driver_ = std::make_unique<Axia80EtherCATDriver>(parameters_);
+    create_bias_services_();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "Driver configuration failed: %s", e.what());
     return hardware_interface::CallbackReturn::ERROR;
@@ -85,6 +88,7 @@ hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_activate(
   }
 
   try {
+    std::lock_guard<std::mutex> lock(driver_mutex_);
     driver_->init();
     if (parameters_.clear_bias_on_activate) {
       driver_->clear_bias();
@@ -94,6 +98,9 @@ hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_activate(
     }
   } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "EtherCAT activation failed: %s", e.what());
+    if (driver_) {
+      driver_->shutdown();
+    }
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -104,6 +111,7 @@ hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_activate(
 hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
+  std::lock_guard<std::mutex> lock(driver_mutex_);
   if (driver_) {
     driver_->shutdown();
   }
@@ -139,6 +147,7 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
   }
 
   try {
+    std::lock_guard<std::mutex> lock(driver_mutex_);
     const auto sample = driver_->read_once();
     if (!sample.valid) {
       return hardware_interface::return_type::OK;
@@ -182,8 +191,11 @@ void Axia80M20EtherCATSensor::parse_parameters_(
     parse_bool(optional_param(params, "read_calibration_sdo", "true"));
   parameters_.counts_per_force = std::stod(optional_param(params, "counts_per_force", "1000000"));
   parameters_.counts_per_torque = std::stod(optional_param(params, "counts_per_torque", "1000000"));
-  if (parameters_.counts_per_force <= 0.0 || parameters_.counts_per_torque <= 0.0) {
-    throw std::runtime_error("counts_per_force/counts_per_torque must be positive");
+  if (!std::isfinite(parameters_.counts_per_force) || parameters_.counts_per_force <= 0.0) {
+    throw std::runtime_error("counts_per_force must be a finite positive value");
+  }
+  if (!std::isfinite(parameters_.counts_per_torque) || parameters_.counts_per_torque <= 0.0) {
+    throw std::runtime_error("counts_per_torque must be a finite positive value");
   }
 
   parameters_.filter_selection =
@@ -195,7 +207,7 @@ void Axia80M20EtherCATSensor::parse_parameters_(
   parameters_.set_bias_on_activate =
     parse_bool(optional_param(params, "set_bias_on_activate", "false"));
   parameters_.clear_bias_on_activate =
-    parse_bool(optional_param(params, "clear_bias_on_activate", "false"));
+    parse_bool(optional_param(params, "clear_bias_on_activate", "true"));
 }
 
 void Axia80M20EtherCATSensor::reset_state_()
@@ -219,6 +231,65 @@ std::string Axia80M20EtherCATSensor::sensor_name_() const
     return info_.sensors[0].name;
   }
   return "ati_axia80_m20";
+}
+
+void Axia80M20EtherCATSensor::create_bias_services_()
+{
+  const auto node = get_node();
+  if (!node) {
+    throw std::runtime_error("hardware node is not available for bias services");
+  }
+
+  set_bias_service_ = node->create_service<std_srvs::srv::Trigger>(
+    "/ati_axia80_m20/set_bias",
+    [this](
+      const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+    {
+      std::lock_guard<std::mutex> lock(driver_mutex_);
+      if (!driver_ready_()) {
+        response->success = false;
+        response->message = "ATI Axia80-M20 EtherCAT driver is not active";
+        return;
+      }
+
+      try {
+        driver_->set_bias();
+        response->success = true;
+        response->message = "ATI Axia80-M20 bias set";
+      } catch (const std::exception & e) {
+        response->success = false;
+        response->message = std::string("Failed to set bias: ") + e.what();
+      }
+    });
+
+  clear_bias_service_ = node->create_service<std_srvs::srv::Trigger>(
+    "/ati_axia80_m20/clear_bias",
+    [this](
+      const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
+      std::shared_ptr<std_srvs::srv::Trigger::Response> response)
+    {
+      std::lock_guard<std::mutex> lock(driver_mutex_);
+      if (!driver_ready_()) {
+        response->success = false;
+        response->message = "ATI Axia80-M20 EtherCAT driver is not active";
+        return;
+      }
+
+      try {
+        driver_->clear_bias();
+        response->success = true;
+        response->message = "ATI Axia80-M20 bias cleared";
+      } catch (const std::exception & e) {
+        response->success = false;
+        response->message = std::string("Failed to clear bias: ") + e.what();
+      }
+    });
+}
+
+bool Axia80M20EtherCATSensor::driver_ready_() const
+{
+  return driver_ && driver_->is_active();
 }
 
 }  // namespace ati_axia80_m20_ethercat_sensor

@@ -13,6 +13,7 @@
   <depend>geometry_msgs</depend>
   <depend>hardware_interface</depend>
   <depend>pluginlib</depend>
+  <depend>std_srvs</depend>
 
   <exec_depend>controller_manager</exec_depend>
   <exec_depend>force_torque_sensor_broadcaster</exec_depend>

@@ -30,7 +30,7 @@
         <param name="filter_selection">0</param>
         <param name="calibration_slot">0</param>
         <param name="sample_rate_code">0</param>
-        <param name="clear_bias_on_activate">false</param>
+        <param name="clear_bias_on_activate">true</param>
         <param name="set_bias_on_activate">false</param>
 
         <state_interface name="timestamp.sec"/>
