@@ -72,7 +72,6 @@ source install/setup.bash
 ## EtherCAT 准备
 
 需要先把 IgH/EtherLab master 绑定到本机连接 ATI 传感器的 EtherCAT 网口。
-项目不会也不应该写死任何人的网卡地址；你需要在自己的机器上查出网口信息后填写。
 
 需要确认和填写的信息：
 
