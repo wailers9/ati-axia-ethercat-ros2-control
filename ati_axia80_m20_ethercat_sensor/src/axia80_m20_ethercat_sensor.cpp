@@ -1,6 +1,8 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_m20_ethercat_sensor.hpp"
 
+#include <chrono>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -14,6 +16,30 @@ namespace ati_axia80_m20_ethercat_sensor
 namespace
 {
 using Parameters = std::unordered_map<std::string, std::string>;
+using diagnostic_msgs::msg::DiagnosticStatus;
+using diagnostic_msgs::msg::KeyValue;
+using namespace std::chrono_literals;
+
+struct StatusBitDescription
+{
+  uint8_t bit;
+  const char * name;
+  bool error;
+};
+
+constexpr StatusBitDescription STATUS_BITS[] = {
+  {0, "internal temperature out of range", true},
+  {1, "supply voltage out of range", true},
+  {2, "broken gage", true},
+  {3, "busy", true},
+  {5, "hardware or stack error", true},
+  {26, "gage out-of-range warning", true},
+  {27, "gage out of range", true},
+  {28, "simulated error", true},
+  {29, "calibration checksum error", true},
+  {30, "sensing range exceeded", true},
+  {31, "error summary", true},
+};
 
 const std::string & required_param(const Parameters & params, const std::string & key)
 {
@@ -44,6 +70,41 @@ uint8_t parse_u8(const std::string & value, const std::string & key, uint8_t max
   }
   return static_cast<uint8_t>(parsed);
 }
+
+std::string hex_u32(uint32_t value)
+{
+  std::ostringstream stream;
+  stream << "0x" << std::hex << std::setw(8) << std::setfill('0') << value;
+  return stream.str();
+}
+
+std::string describe_status_bits(uint32_t status_code)
+{
+  std::ostringstream stream;
+  bool first = true;
+  for (const auto & bit : STATUS_BITS) {
+    if ((status_code & (uint32_t{1} << bit.bit)) == 0) {
+      continue;
+    }
+    if (!first) {
+      stream << "; ";
+    }
+    stream << "bit " << static_cast<unsigned int>(bit.bit) << " " << bit.name;
+    first = false;
+  }
+  if (first) {
+    return "no active status bits";
+  }
+  return stream.str();
+}
+
+KeyValue diagnostic_value(const std::string & key, const std::string & value)
+{
+  KeyValue key_value;
+  key_value.key = key;
+  key_value.value = value;
+  return key_value;
+}
 }  // namespace
 
 hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_init(
@@ -72,6 +133,7 @@ hardware_interface::CallbackReturn Axia80M20EtherCATSensor::on_configure(
     std::lock_guard<std::mutex> lock(driver_mutex_);
     driver_ = std::make_unique<Axia80EtherCATDriver>(parameters_);
     create_bias_services_();
+    create_diagnostics_publisher_();
   } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "Driver configuration failed: %s", e.what());
     return hardware_interface::CallbackReturn::ERROR;
@@ -156,8 +218,12 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
     measurement_ = sample.wrench;
     timestamp_sec_ = static_cast<double>(measurement_.header.stamp.sec);
     timestamp_nanosec_ = static_cast<double>(measurement_.header.stamp.nanosec);
-    status_code_ = static_cast<double>(sample.status_code);
-    sample_counter_ = static_cast<double>(sample.sample_counter);
+    status_code_raw_ = sample.status_code;
+    sample_counter_raw_ = sample.sample_counter;
+    status_code_ = static_cast<double>(status_code_raw_);
+    sample_counter_ = static_cast<double>(sample_counter_raw_);
+    handle_status_code_(status_code_raw_);
+    check_sample_counter_(sample_counter_raw_);
   } catch (const std::exception & e) {
     RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "EtherCAT read failed: %s", e.what());
     return hardware_interface::return_type::ERROR;
@@ -221,6 +287,10 @@ void Axia80M20EtherCATSensor::reset_state_()
   measurement_.wrench.torque.x = nan;
   measurement_.wrench.torque.y = nan;
   measurement_.wrench.torque.z = nan;
+  status_code_raw_ = 0;
+  sample_counter_raw_ = 0;
+  previous_status_code_.reset();
+  previous_sample_counter_.reset();
   status_code_ = nan;
   sample_counter_ = nan;
 }
@@ -240,8 +310,10 @@ void Axia80M20EtherCATSensor::create_bias_services_()
     throw std::runtime_error("hardware node is not available for bias services");
   }
 
+  const auto base_service_name = "/" + sensor_name_();
+
   set_bias_service_ = node->create_service<std_srvs::srv::Trigger>(
-    "/ati_axia80_m20/set_bias",
+    base_service_name + "/set_bias",
     [this](
       const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
       std::shared_ptr<std_srvs::srv::Trigger::Response> response)
@@ -264,7 +336,7 @@ void Axia80M20EtherCATSensor::create_bias_services_()
     });
 
   clear_bias_service_ = node->create_service<std_srvs::srv::Trigger>(
-    "/ati_axia80_m20/clear_bias",
+    base_service_name + "/clear_bias",
     [this](
       const std::shared_ptr<std_srvs::srv::Trigger::Request> /*request*/,
       std::shared_ptr<std_srvs::srv::Trigger::Response> response)
@@ -285,6 +357,126 @@ void Axia80M20EtherCATSensor::create_bias_services_()
         response->message = std::string("Failed to clear bias: ") + e.what();
       }
     });
+}
+
+void Axia80M20EtherCATSensor::create_diagnostics_publisher_()
+{
+  const auto node = get_node();
+  if (!node) {
+    throw std::runtime_error("hardware node is not available for diagnostics");
+  }
+
+  diagnostics_publisher_ =
+    node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
+  diagnostics_timer_ = node->create_wall_timer(1s, [this]() { publish_diagnostics_(); });
+}
+
+void Axia80M20EtherCATSensor::publish_diagnostics_()
+{
+  if (!diagnostics_publisher_) {
+    return;
+  }
+
+  diagnostic_msgs::msg::DiagnosticArray array;
+  array.header.stamp = rclcpp::Clock(RCL_SYSTEM_TIME).now();
+
+  DiagnosticStatus status;
+  status.name = sensor_name_() + ": ATI Axia80-M20";
+  status.hardware_id = sensor_name_();
+  status.level = DiagnosticStatus::STALE;
+  status.message = "driver is not active";
+  status.values.push_back(diagnostic_value("status_code", hex_u32(status_code_raw_)));
+  status.values.push_back(diagnostic_value("status_bits", describe_status_bits(status_code_raw_)));
+  status.values.push_back(diagnostic_value("sample_counter", std::to_string(sample_counter_raw_)));
+
+  std::unique_lock<std::mutex> lock(driver_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    status.level = DiagnosticStatus::STALE;
+    status.message = "diagnostic SDO skipped because EtherCAT driver is busy";
+    array.status.push_back(status);
+    diagnostics_publisher_->publish(array);
+    return;
+  }
+
+  if (!driver_ready_()) {
+    array.status.push_back(status);
+    diagnostics_publisher_->publish(array);
+    return;
+  }
+
+  try {
+    const auto readings = driver_->read_diagnostic_readings();
+    const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
+    const bool diagnostic_error =
+      !readings.status_message.empty() && readings.status_message != "No status code errors";
+
+    status.level = (status_error || diagnostic_error) ?
+      DiagnosticStatus::ERROR : DiagnosticStatus::OK;
+    status.message = readings.status_message.empty() ? "No status code errors" :
+      readings.status_message;
+    status.values.push_back(
+      diagnostic_value("supply_voltage_v", std::to_string(readings.supply_voltage_v)));
+    status.values.push_back(
+      diagnostic_value("gage_temperature_c", std::to_string(readings.gage_temperature_c)));
+    status.values.push_back(
+      diagnostic_value("diagnostic_status_message", status.message));
+  } catch (const std::exception & e) {
+    status.level = DiagnosticStatus::WARN;
+    status.message = std::string("failed to read 0x2080 diagnostic SDO: ") + e.what();
+  }
+
+  array.status.push_back(status);
+  diagnostics_publisher_->publish(array);
+}
+
+void Axia80M20EtherCATSensor::handle_status_code_(uint32_t status_code)
+{
+  if (previous_status_code_ && *previous_status_code_ == status_code) {
+    return;
+  }
+
+  const auto description = describe_status_bits(status_code);
+  if (status_code == 0) {
+    RCLCPP_INFO(
+      rclcpp::get_logger(LOGGER_NAME),
+      "Axia status_code changed to %s: %s",
+      hex_u32(status_code).c_str(),
+      description.c_str());
+  } else {
+    RCLCPP_WARN(
+      rclcpp::get_logger(LOGGER_NAME),
+      "Axia status_code changed to %s: %s",
+      hex_u32(status_code).c_str(),
+      description.c_str());
+  }
+  previous_status_code_ = status_code;
+}
+
+void Axia80M20EtherCATSensor::check_sample_counter_(uint32_t sample_counter)
+{
+  if (!previous_sample_counter_) {
+    previous_sample_counter_ = sample_counter;
+    return;
+  }
+
+  const uint32_t expected = *previous_sample_counter_ + 1u;
+  if (sample_counter == *previous_sample_counter_) {
+    RCLCPP_WARN_THROTTLE(
+      rclcpp::get_logger(LOGGER_NAME),
+      *get_node()->get_clock(),
+      1000,
+      "Axia sample_counter repeated at %u",
+      sample_counter);
+  } else if (sample_counter != expected) {
+    RCLCPP_WARN(
+      rclcpp::get_logger(LOGGER_NAME),
+      "Axia sample_counter discontinuity: previous=%u expected=%u actual=%u",
+      *previous_sample_counter_,
+      expected,
+      sample_counter);
+  }
+
+  previous_sample_counter_ = sample_counter;
 }
 
 bool Axia80M20EtherCATSensor::driver_ready_() const

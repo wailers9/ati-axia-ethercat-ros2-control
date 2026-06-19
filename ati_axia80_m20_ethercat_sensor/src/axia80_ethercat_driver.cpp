@@ -1,8 +1,10 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_ethercat_driver.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/mman.h>
@@ -29,6 +31,25 @@ uint32_t le_u32(const uint8_t * data)
     (static_cast<uint32_t>(data[1]) << 8) |
     (static_cast<uint32_t>(data[2]) << 16) |
     (static_cast<uint32_t>(data[3]) << 24);
+}
+
+uint16_t le_u16(const uint8_t * data)
+{
+  return static_cast<uint16_t>(data[0]) |
+    static_cast<uint16_t>(static_cast<uint16_t>(data[1]) << 8);
+}
+
+std::string hex_object(uint16_t index, uint8_t subindex)
+{
+  std::ostringstream stream;
+  stream << "0x" << std::hex << index << ":0x" << static_cast<unsigned int>(subindex);
+  return stream.str();
+}
+
+std::string clean_sdo_string(const std::vector<uint8_t> & data)
+{
+  const auto end = std::find(data.begin(), data.end(), uint8_t{0});
+  return std::string(data.begin(), end);
 }
 
 void validate_scale(const std::string & name, double value)
@@ -62,13 +83,13 @@ void Axia80EtherCATDriver::init()
   request_master_();
   find_slave_();
   configure_pdos_();
+  activate_master_();
+  write_control_(control_word_(), 0);
+  cycle_once_();
+
   if (parameters_.read_calibration_sdo) {
     read_calibration_sdo_();
   }
-  activate_master_();
-
-  write_control_(control_word_(), 0);
-  cycle_once_();
 }
 
 void Axia80EtherCATDriver::shutdown()
@@ -113,6 +134,7 @@ Axia80Sample Axia80EtherCATDriver::read_once()
 
   ecrt_master_receive(master_);
   ecrt_domain_process(domain_);
+  check_ethercat_state_();
 
   Axia80Sample sample;
   sample.wrench.header.stamp = steady_clock_.now();
@@ -145,6 +167,22 @@ Axia80Sample Axia80EtherCATDriver::read_once()
   ecrt_master_send(master_);
 
   return sample;
+}
+
+Axia80DiagnosticReadings Axia80EtherCATDriver::read_diagnostic_readings() const
+{
+  if (!master_) {
+    throw std::runtime_error("cannot read Axia diagnostics before EtherCAT master is requested");
+  }
+
+  Axia80DiagnosticReadings readings;
+  readings.supply_voltage_v = static_cast<double>(
+    upload_sdo_u16_(OBJ_DIAGNOSTIC_READINGS, SUB_DIAGNOSTIC_SUPPLY_VOLTAGE)) / 10.0;
+  readings.gage_temperature_c = static_cast<double>(
+    upload_sdo_i16_(OBJ_DIAGNOSTIC_READINGS, SUB_DIAGNOSTIC_GAGE_TEMPERATURE)) / 10.0;
+  readings.status_message = upload_sdo_string_(
+    OBJ_DIAGNOSTIC_READINGS, SUB_DIAGNOSTIC_STATUS_MESSAGE, 40);
+  return readings;
 }
 
 void Axia80EtherCATDriver::request_master_()
@@ -219,19 +257,23 @@ void Axia80EtherCATDriver::configure_pdos_()
 
 void Axia80EtherCATDriver::read_calibration_sdo_()
 {
-  parameters_.counts_per_force = static_cast<double>(
-    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_FORCE));
-  parameters_.counts_per_torque = static_cast<double>(
-    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_TORQUE));
+  const auto calibration = read_calibration_info_sdo_();
+  parameters_.counts_per_force = calibration.counts_per_force;
+  parameters_.counts_per_torque = calibration.counts_per_torque;
 
   validate_scale("counts_per_force read from Axia SDO 0x2021:0x37", parameters_.counts_per_force);
   validate_scale("counts_per_torque read from Axia SDO 0x2021:0x38", parameters_.counts_per_torque);
 
   RCLCPP_INFO(
     logger_,
-    "Axia calibration: counts_per_force=%.3f counts_per_torque=%.3f",
+    "Axia calibration: ft_serial='%s' part_number='%s' calibration_time='%s' "
+    "counts_per_force=%.3f counts_per_torque=%.3f active_calibration_slot=%u",
+    calibration.ft_serial.c_str(),
+    calibration.calibration_part_number.c_str(),
+    calibration.calibration_time.c_str(),
     parameters_.counts_per_force,
-    parameters_.counts_per_torque);
+    parameters_.counts_per_torque,
+    static_cast<unsigned int>(calibration.active_calibration_slot));
 }
 
 void Axia80EtherCATDriver::activate_master_()
@@ -281,20 +323,121 @@ uint32_t Axia80EtherCATDriver::control_word_() const
   return word;
 }
 
-uint32_t Axia80EtherCATDriver::upload_sdo_u32_(uint16_t index, uint8_t subindex) const
+void Axia80EtherCATDriver::check_ethercat_state_()
 {
-  std::array<uint8_t, 4> data{};
+  ec_domain_state_t domain_state{};
+  ecrt_domain_state(domain_, &domain_state);
+  if (!have_domain_state_ ||
+    domain_state.working_counter != last_domain_state_.working_counter ||
+    domain_state.wc_state != last_domain_state_.wc_state)
+  {
+    RCLCPP_INFO(
+      logger_,
+      "EtherCAT domain state: working_counter=%u wc_state=%u",
+      domain_state.working_counter,
+      static_cast<unsigned int>(domain_state.wc_state));
+    last_domain_state_ = domain_state;
+    have_domain_state_ = true;
+  }
+
+  ec_master_state_t master_state{};
+  ecrt_master_state(master_, &master_state);
+  if (!have_master_state_ ||
+    master_state.slaves_responding != last_master_state_.slaves_responding ||
+    master_state.al_states != last_master_state_.al_states ||
+    master_state.link_up != last_master_state_.link_up)
+  {
+    RCLCPP_INFO(
+      logger_,
+      "EtherCAT master state: slaves_responding=%u al_states=0x%02x link_up=%u",
+      master_state.slaves_responding,
+      master_state.al_states,
+      static_cast<unsigned int>(master_state.link_up));
+    last_master_state_ = master_state;
+    have_master_state_ = true;
+  }
+
+  ec_slave_config_state_t slave_state{};
+  ecrt_slave_config_state(slave_config_, &slave_state);
+  if (!have_slave_state_ ||
+    slave_state.online != last_slave_state_.online ||
+    slave_state.operational != last_slave_state_.operational ||
+    slave_state.al_state != last_slave_state_.al_state)
+  {
+    RCLCPP_INFO(
+      logger_,
+      "Axia slave state: online=%u operational=%u al_state=0x%02x",
+      static_cast<unsigned int>(slave_state.online),
+      static_cast<unsigned int>(slave_state.operational),
+      slave_state.al_state);
+    last_slave_state_ = slave_state;
+    have_slave_state_ = true;
+  }
+}
+
+Axia80CalibrationInfo Axia80EtherCATDriver::read_calibration_info_sdo_()
+{
+  Axia80CalibrationInfo calibration;
+  calibration.ft_serial = upload_sdo_string_(OBJ_CALIBRATION, 0x01, 8);
+  calibration.calibration_part_number = upload_sdo_string_(OBJ_CALIBRATION, 0x02, 30);
+  calibration.calibration_time = upload_sdo_string_(OBJ_CALIBRATION, 0x04, 30);
+  calibration.counts_per_force = static_cast<double>(
+    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_FORCE));
+  calibration.counts_per_torque = static_cast<double>(
+    upload_sdo_u32_(OBJ_CALIBRATION, SUB_COUNTS_PER_TORQUE));
+  calibration.active_calibration_slot = parameters_.calibration_slot;
+  return calibration;
+}
+
+std::vector<uint8_t> Axia80EtherCATDriver::upload_sdo_(
+  uint16_t index, uint8_t subindex, size_t size) const
+{
+  std::vector<uint8_t> data(size);
   size_t result_size = 0;
   uint32_t abort_code = 0;
   const int ret = ecrt_master_sdo_upload(
     master_, slave_info_.position, index, subindex, data.data(), data.size(), &result_size, &abort_code);
 
-  if (ret != 0 || result_size != data.size()) {
+  if (ret != 0 || result_size > data.size()) {
     throw std::runtime_error(
-      "failed SDO upload 0x" + std::to_string(index) + ":" + std::to_string(subindex) +
+      "failed SDO upload " + hex_object(index, subindex) +
       " abort_code=" + std::to_string(abort_code));
   }
+  data.resize(result_size);
+  return data;
+}
+
+uint32_t Axia80EtherCATDriver::upload_sdo_u32_(uint16_t index, uint8_t subindex) const
+{
+  const auto data = upload_sdo_(index, subindex, 4);
+  if (data.size() != 4) {
+    throw std::runtime_error("unexpected SDO size for " + hex_object(index, subindex));
+  }
   return le_u32(data.data());
+}
+
+int16_t Axia80EtherCATDriver::upload_sdo_i16_(uint16_t index, uint8_t subindex) const
+{
+  const auto data = upload_sdo_(index, subindex, 2);
+  if (data.size() != 2) {
+    throw std::runtime_error("unexpected SDO size for " + hex_object(index, subindex));
+  }
+  return static_cast<int16_t>(le_u16(data.data()));
+}
+
+uint16_t Axia80EtherCATDriver::upload_sdo_u16_(uint16_t index, uint8_t subindex) const
+{
+  const auto data = upload_sdo_(index, subindex, 2);
+  if (data.size() != 2) {
+    throw std::runtime_error("unexpected SDO size for " + hex_object(index, subindex));
+  }
+  return le_u16(data.data());
+}
+
+std::string Axia80EtherCATDriver::upload_sdo_string_(
+  uint16_t index, uint8_t subindex, size_t size) const
+{
+  return clean_sdo_string(upload_sdo_(index, subindex, size));
 }
 
 }  // namespace ati_axia80_m20_ethercat_sensor

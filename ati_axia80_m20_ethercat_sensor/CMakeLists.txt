@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
@@ -26,6 +27,7 @@ endif()
 
 set(THIS_PACKAGE_INCLUDE_DEPENDS
   rclcpp
+  diagnostic_msgs
   geometry_msgs
   hardware_interface
   pluginlib

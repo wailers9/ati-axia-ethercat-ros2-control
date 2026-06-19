@@ -3,9 +3,11 @@
 
 #include <mutex>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "geometry_msgs/msg/wrench_stamped.hpp"
 #include "hardware_interface/sensor_interface.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -39,15 +41,25 @@ private:
   void reset_state_();
   std::string sensor_name_() const;
   void create_bias_services_();
+  void create_diagnostics_publisher_();
+  void publish_diagnostics_();
+  void handle_status_code_(uint32_t status_code);
+  void check_sample_counter_(uint32_t sample_counter);
   bool driver_ready_() const;
 
   Axia80DriverParameters parameters_;
   std::unique_ptr<Axia80EtherCATDriver> driver_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr set_bias_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_bias_service_;
+  rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
+  rclcpp::TimerBase::SharedPtr diagnostics_timer_;
   mutable std::mutex driver_mutex_;
 
   geometry_msgs::msg::WrenchStamped measurement_;
+  uint32_t status_code_raw_{0};
+  uint32_t sample_counter_raw_{0};
+  std::optional<uint32_t> previous_status_code_;
+  std::optional<uint32_t> previous_sample_counter_;
   double timestamp_sec_{0.0};
   double timestamp_nanosec_{0.0};
   double status_code_{0.0};

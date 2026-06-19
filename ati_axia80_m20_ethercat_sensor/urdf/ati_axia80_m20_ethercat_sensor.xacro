@@ -26,7 +26,8 @@
         <param name="counts_per_force">1000000</param>
         <param name="counts_per_torque">1000000</param>
 
-        <!-- Control 1 bits: filter 0..8, calibration slot 0..1, sample rate 0..3. -->
+        <!-- Control 1 bits: filter 0 disables filtering; 1..8 select manual-defined cutoff tables. -->
+        <!-- Calibration slot is 0..1; sample rate code is 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz. -->
         <param name="filter_selection">0</param>
         <param name="calibration_slot">0</param>
         <param name="sample_rate_code">0</param>

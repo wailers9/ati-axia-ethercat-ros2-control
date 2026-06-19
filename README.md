@@ -17,13 +17,19 @@ master. It publishes `geometry_msgs/msg/WrenchStamped` data through
   - `Tx/Ty/Tz`
   - `status_code`
   - `sample_counter`
+- Decodes ATI `0x6010` status bits and logs only when the status word changes.
+- Checks `sample_counter` continuity for repeated or skipped PDO samples.
 - Optionally reads force/torque scale factors from SDO `0x2021:0x37` /
-  `0x2021:0x38`.
+  `0x2021:0x38`, plus serial number, calibration part number, calibration time,
+  and active calibration slot.
+- Publishes ROS 2 diagnostics from low-rate SDO reads of `0x2080`:
+  supply voltage, gage temperature, and ATI priority status message.
+- Logs EtherCAT master, domain, working counter, and slave state changes.
 - Guards against invalid or zero `counts_per_force` and `counts_per_torque`
   values to avoid division by zero.
 - Provides manual bias services:
-  - `/ati_axia80_m20/set_bias`
-  - `/ati_axia80_m20/clear_bias`
+  - `/<sensor_name>/set_bias`
+  - `/<sensor_name>/clear_bias`
 
 ## Dependencies
 
@@ -260,9 +266,9 @@ Recommended workflow:
 
 1. Start the system and wait for the sensor to settle.
 2. Confirm the sensor is in the desired zero-load state.
-3. Call `/ati_axia80_m20/set_bias`.
+3. Call `/<sensor_name>/set_bias`, for example `/ati_axia80_m20/set_bias`.
 4. Check the output on `/ati_axia80_m20_broadcaster/wrench`.
-5. To return to the unbiased output, call `/ati_axia80_m20/clear_bias`.
+5. To return to the unbiased output, call `/<sensor_name>/clear_bias`.
 
 If the driver is not configured or the hardware is not active, the service
 returns `success=false` with an error message.
@@ -283,7 +289,7 @@ These parameters are configured in
 | `read_calibration_sdo` | `true` | Read SDO calibration scales on activation |
 | `counts_per_force` | `1000000` | Manual force scale |
 | `counts_per_torque` | `1000000` | Manual torque scale |
-| `filter_selection` | `0` | Sensor low-pass filter option, 0..8 |
+| `filter_selection` | `0` | ATI low-pass filter selection in `0x7010:01` bits 4..7. `0` disables filtering; `1..8` select progressively lower cutoff frequencies from the manual table. |
 | `calibration_slot` | `0` | Calibration slot, 0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
 | `clear_bias_on_activate` | `true` | Clear any existing bias on activation |
@@ -300,6 +306,38 @@ If SDO reads fail in the field, set:
 
 Then manually configure `counts_per_force` and `counts_per_torque`. Both values
 must be finite positive numbers and cannot be `0`.
+
+### Low-pass Filter Selection
+
+The Axia firmware applies filtering inside the sensor before the PDO readings
+are published. The cutoff depends on both `filter_selection` and
+`sample_rate_code`.
+
+| `filter_selection` | 0.5 kHz rate | 1 kHz rate | 2 kHz rate | 4 kHz rate |
+| --- | ---: | ---: | ---: | ---: |
+| `0` | 200 Hz | 350 Hz | 500 Hz | 1000 Hz |
+| `1` | 58 Hz | 115 Hz | 235 Hz | 460 Hz |
+| `2` | 22 Hz | 45 Hz | 90 Hz | 180 Hz |
+| `3` | 10 Hz | 21 Hz | 43 Hz | 84 Hz |
+| `4` | 5 Hz | 10 Hz | 20 Hz | 40 Hz |
+| `5` | 2.5 Hz | 5 Hz | 10 Hz | 20 Hz |
+| `6` | 1.3 Hz | 3 Hz | 5 Hz | 10 Hz |
+| `7` | 0.6 Hz | 1.2 Hz | 2.4 Hz | 4.7 Hz |
+| `8` | 0.3 Hz | 0.7 Hz | 1.4 Hz | 2.7 Hz |
+
+### Diagnostics and Status
+
+ATI recommends monitoring `0x6010: Status Code` instead of the standard
+EtherCAT `0x1001 Error Register`. The driver keeps the raw `uint32_t` status
+word internally, exports it as the ROS 2 control `double` state interface, and
+logs decoded bits only when the word changes.
+
+The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` outside the
+real-time `read()` path. It reports external supply voltage, gage temperature,
+and ATI's priority status message, including voltage faults, temperature
+faults, calibration checksum errors, disconnected or out-of-range gages,
+force/torque range faults, hardware or stack errors, simulated errors, and
+unspecified errors.
 
 ## Using It in Your Robot Description
 

@@ -22,11 +22,15 @@ constexpr uint16_t OBJ_STATUS_CODE = 0x6010;
 constexpr uint16_t OBJ_SAMPLE_COUNTER = 0x6020;
 constexpr uint16_t OBJ_CONTROL_CODES = 0x7010;
 constexpr uint16_t OBJ_CALIBRATION = 0x2021;
+constexpr uint16_t OBJ_DIAGNOSTIC_READINGS = 0x2080;
 
 constexpr uint8_t SUB_CONTROL_1 = 0x01;
 constexpr uint8_t SUB_CONTROL_2 = 0x02;
 constexpr uint8_t SUB_COUNTS_PER_FORCE = 0x37;
 constexpr uint8_t SUB_COUNTS_PER_TORQUE = 0x38;
+constexpr uint8_t SUB_DIAGNOSTIC_SUPPLY_VOLTAGE = 0x01;
+constexpr uint8_t SUB_DIAGNOSTIC_GAGE_TEMPERATURE = 0x02;
+constexpr uint8_t SUB_DIAGNOSTIC_STATUS_MESSAGE = 0x03;
 
 struct AxiaPdoOffsets
 {
