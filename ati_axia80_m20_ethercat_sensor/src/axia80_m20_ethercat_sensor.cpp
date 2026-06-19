@@ -368,7 +368,7 @@ void Axia80M20EtherCATSensor::create_diagnostics_publisher_()
 
   diagnostics_publisher_ =
     node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
-  diagnostics_timer_ = node->create_wall_timer(5s, [this]() { publish_diagnostics_(); });
+  diagnostics_timer_ = node->create_wall_timer(1s, [this]() { publish_diagnostics_(); });
 }
 
 void Axia80M20EtherCATSensor::publish_diagnostics_()
@@ -468,8 +468,10 @@ void Axia80M20EtherCATSensor::check_sample_counter_(uint32_t sample_counter)
       "Axia sample_counter repeated at %u",
       sample_counter);
   } else if (sample_counter != expected) {
-    RCLCPP_WARN(
+    RCLCPP_WARN_THROTTLE(
       rclcpp::get_logger(LOGGER_NAME),
+      *get_node()->get_clock(),
+      1000,
       "Axia sample_counter discontinuity: previous=%u expected=%u actual=%u",
       *previous_sample_counter_,
       expected,

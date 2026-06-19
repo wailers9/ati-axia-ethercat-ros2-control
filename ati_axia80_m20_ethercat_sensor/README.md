@@ -360,8 +360,8 @@ EtherCAT master, domain, and slave state checks are throttled to once per second
 and logged only when state changes. The first `read_once()` after activation
 always performs one EtherCAT state check.
 
-The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` every five
-seconds outside the real-time `read()` path. It reports external supply voltage,
+The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` at 1 Hz
+outside the real-time `read()` path. It reports external supply voltage,
 gage temperature, and ATI's priority status message, including voltage faults,
 temperature faults, calibration checksum errors, disconnected or out-of-range
 gages, force/torque range faults, hardware or stack errors, simulated errors,
