@@ -1,6 +1,7 @@
 #ifndef ATI_AXIA80_M20_ETHERCAT_SENSOR__AXIA80_ETHERCAT_DRIVER_HPP_
 #define ATI_AXIA80_M20_ETHERCAT_SENSOR__AXIA80_ETHERCAT_DRIVER_HPP_
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -110,6 +111,7 @@ private:
   bool have_domain_state_{false};
   bool have_master_state_{false};
   bool have_slave_state_{false};
+  std::chrono::steady_clock::time_point next_state_check_time_{};
 
   rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
   rclcpp::Logger logger_;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <sstream>
@@ -15,6 +16,8 @@ namespace ati_axia80_m20_ethercat_sensor
 {
 namespace
 {
+using namespace std::chrono_literals;
+
 constexpr size_t MAX_SAFE_STACK = 8 * 1024;
 constexpr uint32_t CONTROL_SET_BIAS = 1u << 0;
 constexpr uint32_t CONTROL_CLEAR_BIAS = 1u << 2;
@@ -134,7 +137,11 @@ Axia80Sample Axia80EtherCATDriver::read_once()
 
   ecrt_master_receive(master_);
   ecrt_domain_process(domain_);
-  check_ethercat_state_();
+  const auto now = std::chrono::steady_clock::now();
+  if (now >= next_state_check_time_) {
+    check_ethercat_state_();
+    next_state_check_time_ = now + 1s;
+  }
 
   Axia80Sample sample;
   sample.wrench.header.stamp = steady_clock_.now();

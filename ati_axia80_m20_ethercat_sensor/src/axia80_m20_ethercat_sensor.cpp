@@ -368,7 +368,7 @@ void Axia80M20EtherCATSensor::create_diagnostics_publisher_()
 
   diagnostics_publisher_ =
     node->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
-  diagnostics_timer_ = node->create_wall_timer(1s, [this]() { publish_diagnostics_(); });
+  diagnostics_timer_ = node->create_wall_timer(5s, [this]() { publish_diagnostics_(); });
 }
 
 void Axia80M20EtherCATSensor::publish_diagnostics_()
