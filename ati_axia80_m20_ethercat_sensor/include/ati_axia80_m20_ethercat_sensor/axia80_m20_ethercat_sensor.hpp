@@ -1,6 +1,9 @@
 #ifndef ATI_AXIA80_M20_ETHERCAT_SENSOR__AXIA80_M20_ETHERCAT_SENSOR_HPP_
 #define ATI_AXIA80_M20_ETHERCAT_SENSOR__AXIA80_M20_ETHERCAT_SENSOR_HPP_
 
+#include <chrono>
+#include <cstdint>
+#include <future>
 #include <mutex>
 #include <memory>
 #include <optional>
@@ -19,6 +22,20 @@ namespace ati_axia80_m20_ethercat_sensor
 {
 
 constexpr char LOGGER_NAME[] = "ATIAxia80M20EtherCATSensor";
+
+struct RuntimeDiagnosticSdoResult
+{
+  enum class Outcome
+  {
+    SUCCESS,
+    SKIPPED,
+    FAILED
+  };
+
+  Outcome outcome{Outcome::FAILED};
+  Axia80DiagnosticReadings readings;
+  std::string message;
+};
 
 class Axia80M20EtherCATSensor : public hardware_interface::SensorInterface
 {
@@ -43,6 +60,7 @@ private:
   void create_bias_services_();
   void create_diagnostics_publisher_();
   void publish_diagnostics_();
+  RuntimeDiagnosticSdoResult read_runtime_diagnostic_sdo_();
   void handle_status_code_(uint32_t status_code);
   void check_sample_counter_(uint32_t sample_counter);
   bool driver_ready_() const;
@@ -54,6 +72,13 @@ private:
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
   rclcpp::TimerBase::SharedPtr diagnostics_timer_;
   mutable std::mutex driver_mutex_;
+  bool runtime_diagnostic_sdo_enabled_{true};
+  std::chrono::milliseconds runtime_diagnostic_sdo_timeout_{100};
+  std::future<RuntimeDiagnosticSdoResult> runtime_diagnostic_sdo_future_;
+  bool runtime_diagnostic_sdo_timed_out_{false};
+  uint64_t sdo_success_{0};
+  uint64_t sdo_skipped_{0};
+  uint64_t sdo_failed_{0};
 
   geometry_msgs::msg::WrenchStamped measurement_;
   uint32_t status_code_raw_{0};

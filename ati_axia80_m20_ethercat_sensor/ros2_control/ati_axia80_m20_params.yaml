@@ -8,6 +8,8 @@ ati_axia80_m20:
 
   # Preferred: read these from SDO 0x2021:0x37/0x38 during activation.
   read_calibration_sdo: true
+  runtime_diagnostic_sdo: true
+  runtime_diagnostic_sdo_timeout_ms: 100
   counts_per_force: 1000000
   counts_per_torque: 1000000
 

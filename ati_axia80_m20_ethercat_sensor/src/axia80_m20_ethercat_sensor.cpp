@@ -255,6 +255,15 @@ void Axia80M20EtherCATSensor::parse_parameters_(
 
   parameters_.read_calibration_sdo =
     parse_bool(optional_param(params, "read_calibration_sdo", "true"));
+  runtime_diagnostic_sdo_enabled_ =
+    parse_bool(optional_param(params, "runtime_diagnostic_sdo", "true"));
+  const auto runtime_diagnostic_sdo_timeout_ms =
+    std::stoul(optional_param(params, "runtime_diagnostic_sdo_timeout_ms", "100"));
+  if (runtime_diagnostic_sdo_timeout_ms == 0) {
+    throw std::runtime_error("runtime_diagnostic_sdo_timeout_ms must be > 0");
+  }
+  runtime_diagnostic_sdo_timeout_ =
+    std::chrono::milliseconds(runtime_diagnostic_sdo_timeout_ms);
   parameters_.counts_per_force = std::stod(optional_param(params, "counts_per_force", "1000000"));
   parameters_.counts_per_torque = std::stod(optional_param(params, "counts_per_torque", "1000000"));
   if (!std::isfinite(parameters_.counts_per_force) || parameters_.counts_per_force <= 0.0) {
@@ -389,44 +398,132 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
   status.values.push_back(diagnostic_value("status_bits", describe_status_bits(status_code_raw_)));
   status.values.push_back(diagnostic_value("sample_counter", std::to_string(sample_counter_raw_)));
 
-  std::unique_lock<std::mutex> lock(driver_mutex_, std::try_to_lock);
-  if (!lock.owns_lock()) {
-    status.level = DiagnosticStatus::STALE;
-    status.message = "diagnostic SDO skipped because EtherCAT driver is busy";
+  const auto publish = [&]() {
+    status.values.push_back(diagnostic_value("sdo_success", std::to_string(sdo_success_)));
+    status.values.push_back(diagnostic_value("sdo_skipped", std::to_string(sdo_skipped_)));
+    status.values.push_back(diagnostic_value("sdo_failed", std::to_string(sdo_failed_)));
     array.status.push_back(status);
     diagnostics_publisher_->publish(array);
+  };
+
+  if (!runtime_diagnostic_sdo_enabled_) {
+    ++sdo_skipped_;
+    const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
+    status.level = status_error ? DiagnosticStatus::ERROR : DiagnosticStatus::OK;
+    status.message = "runtime diagnostic SDO disabled";
+    publish();
     return;
+  }
+
+  if (runtime_diagnostic_sdo_future_.valid()) {
+    const auto future_status = runtime_diagnostic_sdo_future_.wait_for(0ms);
+    if (future_status == std::future_status::ready) {
+      try {
+        const auto result = runtime_diagnostic_sdo_future_.get();
+        if (!runtime_diagnostic_sdo_timed_out_) {
+          if (result.outcome == RuntimeDiagnosticSdoResult::Outcome::SUCCESS) {
+            ++sdo_success_;
+          } else if (result.outcome == RuntimeDiagnosticSdoResult::Outcome::SKIPPED) {
+            ++sdo_skipped_;
+          } else {
+            ++sdo_failed_;
+          }
+        }
+        runtime_diagnostic_sdo_timed_out_ = false;
+      } catch (const std::exception &) {
+        if (!runtime_diagnostic_sdo_timed_out_) {
+          ++sdo_failed_;
+        }
+        runtime_diagnostic_sdo_timed_out_ = false;
+      }
+    } else {
+      ++sdo_skipped_;
+      status.level = DiagnosticStatus::STALE;
+      status.message = runtime_diagnostic_sdo_timed_out_ ?
+        "runtime diagnostic SDO still running after timeout" :
+        "runtime diagnostic SDO still running";
+      publish();
+      return;
+    }
+  }
+
+  runtime_diagnostic_sdo_future_ = std::async(
+    std::launch::async, [this]() { return read_runtime_diagnostic_sdo_(); });
+  const auto future_status = runtime_diagnostic_sdo_future_.wait_for(runtime_diagnostic_sdo_timeout_);
+  if (future_status != std::future_status::ready) {
+    ++sdo_failed_;
+    runtime_diagnostic_sdo_timed_out_ = true;
+    status.level = DiagnosticStatus::WARN;
+    status.message = "runtime diagnostic SDO timed out after " +
+      std::to_string(runtime_diagnostic_sdo_timeout_.count()) + " ms";
+    publish();
+    return;
+  }
+
+  const auto result = runtime_diagnostic_sdo_future_.get();
+  runtime_diagnostic_sdo_timed_out_ = false;
+  if (result.outcome == RuntimeDiagnosticSdoResult::Outcome::SKIPPED) {
+    ++sdo_skipped_;
+    status.level = DiagnosticStatus::STALE;
+    status.message = result.message;
+    publish();
+    return;
+  }
+  if (result.outcome == RuntimeDiagnosticSdoResult::Outcome::FAILED) {
+    ++sdo_failed_;
+    status.level = DiagnosticStatus::WARN;
+    status.message = result.message;
+    publish();
+    return;
+  }
+
+  ++sdo_success_;
+  const auto & readings = result.readings;
+  const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
+  const bool diagnostic_error =
+    !readings.status_message.empty() && readings.status_message != "No status code errors";
+
+  status.level = (status_error || diagnostic_error) ?
+    DiagnosticStatus::ERROR : DiagnosticStatus::OK;
+  status.message = readings.status_message.empty() ? "No status code errors" :
+    readings.status_message;
+  status.values.push_back(
+    diagnostic_value("supply_voltage_v", std::to_string(readings.supply_voltage_v)));
+  status.values.push_back(
+    diagnostic_value("gage_temperature_c", std::to_string(readings.gage_temperature_c)));
+  status.values.push_back(
+    diagnostic_value("diagnostic_status_message", status.message));
+  publish();
+}
+
+RuntimeDiagnosticSdoResult Axia80M20EtherCATSensor::read_runtime_diagnostic_sdo_()
+{
+  std::unique_lock<std::mutex> lock(driver_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return {
+      RuntimeDiagnosticSdoResult::Outcome::SKIPPED,
+      {},
+      "diagnostic SDO skipped because EtherCAT driver is busy"};
   }
 
   if (!driver_ready_()) {
-    array.status.push_back(status);
-    diagnostics_publisher_->publish(array);
-    return;
+    return {
+      RuntimeDiagnosticSdoResult::Outcome::SKIPPED,
+      {},
+      "driver is not active"};
   }
 
   try {
-    const auto readings = driver_->read_diagnostic_readings();
-    const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
-    const bool diagnostic_error =
-      !readings.status_message.empty() && readings.status_message != "No status code errors";
-
-    status.level = (status_error || diagnostic_error) ?
-      DiagnosticStatus::ERROR : DiagnosticStatus::OK;
-    status.message = readings.status_message.empty() ? "No status code errors" :
-      readings.status_message;
-    status.values.push_back(
-      diagnostic_value("supply_voltage_v", std::to_string(readings.supply_voltage_v)));
-    status.values.push_back(
-      diagnostic_value("gage_temperature_c", std::to_string(readings.gage_temperature_c)));
-    status.values.push_back(
-      diagnostic_value("diagnostic_status_message", status.message));
+    return {
+      RuntimeDiagnosticSdoResult::Outcome::SUCCESS,
+      driver_->read_diagnostic_readings(),
+      {}};
   } catch (const std::exception & e) {
-    status.level = DiagnosticStatus::WARN;
-    status.message = std::string("failed to read 0x2080 diagnostic SDO: ") + e.what();
+    return {
+      RuntimeDiagnosticSdoResult::Outcome::FAILED,
+      {},
+      std::string("failed to read 0x2080 diagnostic SDO: ") + e.what()};
   }
-
-  array.status.push_back(status);
-  diagnostics_publisher_->publish(array);
 }
 
 void Axia80M20EtherCATSensor::handle_status_code_(uint32_t status_code)

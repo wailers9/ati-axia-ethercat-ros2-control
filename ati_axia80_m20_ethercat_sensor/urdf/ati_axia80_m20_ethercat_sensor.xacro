@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="ati_axia80_m20_ethercat_sensor"
-               params="name:=ati_axia80_m20 parent:=tool0 master_index:=0 slave_position:=0 slave_alias:=0">
+               params="name:=ati_axia80_m20 parent:=tool0 master_index:=0 slave_position:=0 slave_alias:=0 runtime_diagnostic_sdo:=true runtime_diagnostic_sdo_timeout_ms:=100">
     <link name="${name}_link"/>
 
     <joint name="${name}_joint" type="fixed">
@@ -23,6 +23,8 @@
 
         <!-- Prefer SDO calibration. Set false and fill values manually if SDO is unavailable. -->
         <param name="read_calibration_sdo">true</param>
+        <param name="runtime_diagnostic_sdo">${runtime_diagnostic_sdo}</param>
+        <param name="runtime_diagnostic_sdo_timeout_ms">${runtime_diagnostic_sdo_timeout_ms}</param>
         <param name="counts_per_force">1000000</param>
         <param name="counts_per_torque">1000000</param>
 

@@ -287,6 +287,8 @@ These parameters are configured in
 | `product_code` | `0x26483053` | Axia EtherCAT Product Code |
 | `revision` | `0x00000001` | Revision |
 | `read_calibration_sdo` | `true` | Read SDO calibration scales on activation |
+| `runtime_diagnostic_sdo` | `true` | Read runtime SDO diagnostics on `/diagnostics` |
+| `runtime_diagnostic_sdo_timeout_ms` | `100` | Runtime SDO diagnostics timeout in milliseconds |
 | `counts_per_force` | `1000000` | Manual force scale |
 | `counts_per_torque` | `1000000` | Manual torque scale |
 | `filter_selection` | `0` | ATI low-pass filter selection in `0x7010:01` bits 4..7. `0` disables filtering; `1..8` select progressively lower cutoff frequencies from the manual table. |
@@ -347,6 +349,9 @@ Expected `/diagnostics` key values include:
 status_code
 status_bits
 sample_counter
+sdo_success
+sdo_skipped
+sdo_failed
 supply_voltage_v
 gage_temperature_c
 diagnostic_status_message
@@ -361,11 +366,23 @@ and logged only when state changes. The first `read_once()` after activation
 always performs one EtherCAT state check.
 
 The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` at 1 Hz
-outside the real-time `read()` path. It reports external supply voltage,
-gage temperature, and ATI's priority status message, including voltage faults,
-temperature faults, calibration checksum errors, disconnected or out-of-range
-gages, force/torque range faults, hardware or stack errors, simulated errors,
-and unspecified errors.
+outside the real-time `read()` path when `runtime_diagnostic_sdo` is true. Each
+runtime SDO attempt is limited by `runtime_diagnostic_sdo_timeout_ms`, and the
+driver reports cumulative `sdo_success`, `sdo_skipped`, and `sdo_failed` counts.
+If an SDO attempt times out, the driver does not start another runtime SDO until
+the previous attempt finishes.
+It reports external supply voltage, gage temperature, and ATI's priority status
+message, including voltage faults, temperature faults, calibration checksum
+errors, disconnected or out-of-range gages, force/torque range faults, hardware
+or stack errors, simulated errors, and unspecified errors.
+
+If `sample_counter` discontinuities become frequent, or `/diagnostics` reports
+that runtime SDO is repeatedly skipped because the EtherCAT driver is busy,
+disable runtime SDO diagnostics and rely on PDO data plus status logs:
+
+```xml
+<param name="runtime_diagnostic_sdo">false</param>
+```
 
 ## Using It in Your Robot Description
 
