@@ -288,7 +288,7 @@ These parameters are configured in
 | `revision` | `0x00000001` | Revision |
 | `read_calibration_sdo` | `true` | Read SDO calibration scales on activation |
 | `runtime_diagnostic_sdo` | `true` | Read runtime SDO diagnostics on `/diagnostics` |
-| `runtime_diagnostic_sdo_timeout_ms` | `100` | Runtime SDO diagnostics timeout in milliseconds |
+| `runtime_diagnostic_sdo_timeout_ms` | `5` | Runtime SDO diagnostics auto-pause threshold in milliseconds |
 | `counts_per_force` | `1000000` | Manual force scale |
 | `counts_per_torque` | `1000000` | Manual torque scale |
 | `filter_selection` | `0` | ATI low-pass filter selection in `0x7010:01` bits 4..7. `0` disables filtering; `1..8` select progressively lower cutoff frequencies from the manual table. |
@@ -308,6 +308,8 @@ If SDO reads fail in the field, set:
 
 Then manually configure `counts_per_force` and `counts_per_torque`. Both values
 must be finite positive numbers and cannot be `0`.
+Startup calibration SDO happens before the realtime read loop; the driver warns
+if this activation-time SDO phase takes more than 500 ms.
 
 ### Low-pass Filter Selection
 
@@ -352,6 +354,10 @@ sample_counter
 sdo_success
 sdo_skipped
 sdo_failed
+runtime_sdo_last_elapsed_us
+runtime_sdo_consecutive_lock_failures
+runtime_sdo_auto_paused
+runtime_sdo_pause_reason
 supply_voltage_v
 gage_temperature_c
 diagnostic_status_message
@@ -367,10 +373,14 @@ always performs one EtherCAT state check.
 
 The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` at 1 Hz
 outside the real-time `read()` path when `runtime_diagnostic_sdo` is true. Each
-runtime SDO attempt is limited by `runtime_diagnostic_sdo_timeout_ms`, and the
-driver reports cumulative `sdo_success`, `sdo_skipped`, and `sdo_failed` counts.
-If an SDO attempt times out, the driver does not start another runtime SDO until
-the previous attempt finishes.
+runtime SDO task uses `try_lock` and does not wait for the EtherCAT driver lock.
+The target runtime SDO duration is below 500 us. The driver warns if an attempt
+takes more than 1 ms, and automatically pauses runtime SDO diagnostics if an
+attempt exceeds `runtime_diagnostic_sdo_timeout_ms` or if five consecutive
+attempts cannot acquire the driver lock. When auto-paused, `/diagnostics`
+reports `runtime_sdo_auto_paused=true` and `runtime_sdo_pause_reason`.
+If an SDO attempt is still running on the next diagnostics tick, the driver does
+not start a second runtime SDO.
 It reports external supply voltage, gage temperature, and ATI's priority status
 message, including voltage faults, temperature faults, calibration checksum
 errors, disconnected or out-of-range gages, force/torque range faults, hardware
@@ -383,6 +393,9 @@ disable runtime SDO diagnostics and rely on PDO data plus status logs:
 ```xml
 <param name="runtime_diagnostic_sdo">false</param>
 ```
+
+That same setting is the manual runtime SDO pause command. Re-enable it by
+setting `runtime_diagnostic_sdo` back to `true` before launch.
 
 ## Using It in Your Robot Description
 

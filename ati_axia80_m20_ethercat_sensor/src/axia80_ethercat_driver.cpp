@@ -19,6 +19,7 @@ namespace
 using namespace std::chrono_literals;
 
 constexpr size_t MAX_SAFE_STACK = 8 * 1024;
+constexpr auto STARTUP_SDO_WARN_THRESHOLD = 500ms;
 constexpr uint32_t CONTROL_SET_BIAS = 1u << 0;
 constexpr uint32_t CONTROL_CLEAR_BIAS = 1u << 2;
 
@@ -91,7 +92,17 @@ void Axia80EtherCATDriver::init()
   cycle_once_();
 
   if (parameters_.read_calibration_sdo) {
+    const auto start = std::chrono::steady_clock::now();
     read_calibration_sdo_();
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    if (elapsed > STARTUP_SDO_WARN_THRESHOLD) {
+      const auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+      RCLCPP_WARN(
+        logger_,
+        "Startup calibration SDO took %lld ms",
+        static_cast<long long>(elapsed_ms));
+    }
   }
 }
 

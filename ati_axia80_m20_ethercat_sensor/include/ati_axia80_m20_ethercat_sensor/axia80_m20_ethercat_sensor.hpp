@@ -35,6 +35,7 @@ struct RuntimeDiagnosticSdoResult
   Outcome outcome{Outcome::FAILED};
   Axia80DiagnosticReadings readings;
   std::string message;
+  uint64_t elapsed_us{0};
 };
 
 class Axia80M20EtherCATSensor : public hardware_interface::SensorInterface
@@ -73,9 +74,13 @@ private:
   rclcpp::TimerBase::SharedPtr diagnostics_timer_;
   mutable std::mutex driver_mutex_;
   bool runtime_diagnostic_sdo_enabled_{true};
-  std::chrono::milliseconds runtime_diagnostic_sdo_timeout_{100};
+  std::chrono::milliseconds runtime_diagnostic_sdo_timeout_{5};
   std::future<RuntimeDiagnosticSdoResult> runtime_diagnostic_sdo_future_;
-  bool runtime_diagnostic_sdo_timed_out_{false};
+  std::chrono::steady_clock::time_point runtime_diagnostic_sdo_start_time_{};
+  bool runtime_diagnostic_sdo_auto_paused_{false};
+  std::string runtime_diagnostic_sdo_pause_reason_;
+  uint32_t consecutive_runtime_sdo_lock_failures_{0};
+  uint64_t runtime_sdo_last_elapsed_us_{0};
   uint64_t sdo_success_{0};
   uint64_t sdo_skipped_{0};
   uint64_t sdo_failed_{0};
