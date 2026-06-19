@@ -110,6 +110,7 @@ void Axia80EtherCATDriver::shutdown()
   domain_ = nullptr;
   slave_config_ = nullptr;
   domain_pd_ = nullptr;
+  state_check_required_ = true;
 }
 
 void Axia80EtherCATDriver::set_bias()
@@ -138,8 +139,9 @@ Axia80Sample Axia80EtherCATDriver::read_once()
   ecrt_master_receive(master_);
   ecrt_domain_process(domain_);
   const auto now = std::chrono::steady_clock::now();
-  if (now >= next_state_check_time_) {
+  if (state_check_required_ || now >= next_state_check_time_) {
     check_ethercat_state_();
+    state_check_required_ = false;
     next_state_check_time_ = now + 1s;
   }
 
@@ -292,6 +294,7 @@ void Axia80EtherCATDriver::activate_master_()
   if (!domain_pd_) {
     throw std::runtime_error("failed to get EtherCAT domain process data pointer");
   }
+  state_check_required_ = true;
   active_ = true;
 }
 

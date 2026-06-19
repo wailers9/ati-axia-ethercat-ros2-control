@@ -111,6 +111,7 @@ private:
   bool have_domain_state_{false};
   bool have_master_state_{false};
   bool have_slave_state_{false};
+  bool state_check_required_{true};
   std::chrono::steady_clock::time_point next_state_check_time_{};
 
   rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
