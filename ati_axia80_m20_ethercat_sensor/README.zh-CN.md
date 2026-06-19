@@ -303,6 +303,45 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 
 如果你的末端 link 不是 `tool0`，请把 `parent` 改成实际 link 名称。
 
+## 诊断和调试
+
+ATI 建议监控 `0x6010: Status Code`，而不是标准 EtherCAT
+`0x1001 Error Register`。驱动内部保留原始 `uint32_t` status word，将它导出为
+ROS 2 control `double` state interface，并在 status word 变化时打印解析后的 bit
+说明。解析后的 status bit 摘要也会通过 ROS diagnostics 的 `status_bits` 字段发布。
+
+controller active 后可用下面的命令检查：
+
+```bash
+ros2 topic echo /diagnostics
+ros2 control list_hardware_interfaces
+ros2 topic echo /ati_axia80_m20_broadcaster/wrench
+```
+
+`/diagnostics` 中应能看到这些 key：
+
+```text
+status_code
+status_bits
+sample_counter
+supply_voltage_v
+gage_temperature_c
+diagnostic_status_message
+```
+
+高频 `read()` 周期每次都会执行 PDO receive/process 和 PDO queue/send。每个有效
+PDO sample 都会更新 `status_code`、解析 status bits，并检查 `sample_counter`
+是否重复或跳变。
+
+EtherCAT master、domain、slave state 检查被限制为每 1 秒最多执行一次，并且只在
+状态变化时打印日志。激活后的第一次 `read_once()` 一定会执行一次 EtherCAT state
+检查。
+
+`/diagnostics` publisher 每 5 秒在实时 `read()` 路径之外读取一次
+`0x2080: Diagnostic Readings` SDO。它会报告外部供电电压、应变片温度和 ATI
+priority status message，包括电压故障、温度故障、标定校验错误、应变片断开或超限、
+力/力矩量程超限、硬件或协议栈错误、模拟错误以及未分类错误。
+
 ## PDO 映射
 
 RxPDO `0x1601`：

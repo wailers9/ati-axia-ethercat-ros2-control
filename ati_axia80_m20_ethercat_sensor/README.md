@@ -330,14 +330,42 @@ are published. The cutoff depends on both `filter_selection` and
 ATI recommends monitoring `0x6010: Status Code` instead of the standard
 EtherCAT `0x1001 Error Register`. The driver keeps the raw `uint32_t` status
 word internally, exports it as the ROS 2 control `double` state interface, and
-logs decoded bits only when the word changes.
+logs decoded bits only when the word changes. The decoded status bit summary is
+also published in ROS diagnostics as `status_bits`.
 
-The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` outside the
-real-time `read()` path. It reports external supply voltage, gage temperature,
-and ATI's priority status message, including voltage faults, temperature
-faults, calibration checksum errors, disconnected or out-of-range gages,
-force/torque range faults, hardware or stack errors, simulated errors, and
-unspecified errors.
+Use these commands while the controller is active:
+
+```bash
+ros2 topic echo /diagnostics
+ros2 control list_hardware_interfaces
+ros2 topic echo /ati_axia80_m20_broadcaster/wrench
+```
+
+Expected `/diagnostics` key values include:
+
+```text
+status_code
+status_bits
+sample_counter
+supply_voltage_v
+gage_temperature_c
+diagnostic_status_message
+```
+
+The high-frequency `read()` cycle always performs PDO receive/process and PDO
+queue/send work. On each valid PDO sample it updates `status_code`, decodes the
+status bits, and checks `sample_counter` continuity.
+
+EtherCAT master, domain, and slave state checks are throttled to once per second
+and logged only when state changes. The first `read_once()` after activation
+always performs one EtherCAT state check.
+
+The `/diagnostics` publisher reads `0x2080: Diagnostic Readings` every five
+seconds outside the real-time `read()` path. It reports external supply voltage,
+gage temperature, and ATI's priority status message, including voltage faults,
+temperature faults, calibration checksum errors, disconnected or out-of-range
+gages, force/torque range faults, hardware or stack errors, simulated errors,
+and unspecified errors.
 
 ## Using It in Your Robot Description
 
