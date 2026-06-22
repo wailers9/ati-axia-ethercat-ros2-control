@@ -205,6 +205,25 @@ Axia80DiagnosticReadings Axia80EtherCATDriver::read_diagnostic_readings() const
   return readings;
 }
 
+Axia80EtherCATState Axia80EtherCATDriver::state_snapshot() const
+{
+  Axia80EtherCATState state;
+  state.have_domain_state = have_domain_state_;
+  state.domain_working_counter = last_domain_state_.working_counter;
+  state.domain_wc_state = static_cast<unsigned int>(last_domain_state_.wc_state);
+
+  state.have_master_state = have_master_state_;
+  state.master_slaves_responding = last_master_state_.slaves_responding;
+  state.master_al_states = last_master_state_.al_states;
+  state.master_link_up = last_master_state_.link_up != 0;
+
+  state.have_slave_state = have_slave_state_;
+  state.slave_online = last_slave_state_.online != 0;
+  state.slave_operational = last_slave_state_.operational != 0;
+  state.slave_al_state = last_slave_state_.al_state;
+  return state;
+}
+
 void Axia80EtherCATDriver::request_master_()
 {
   master_ = ecrt_request_master(parameters_.master_index);

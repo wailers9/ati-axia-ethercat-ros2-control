@@ -237,9 +237,13 @@ source install/setup.bash
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
 ```
 
-The monitor checks at 10 second intervals by default, which is 0.1 Hz. It does
-not control EtherCAT and does not participate in the real-time control path. On
-startup, the node prints the dashboard address once:
+The monitor does not control EtherCAT and does not participate in the real-time
+control path. Service, topic, and interface checks stay low-rate at 10 second
+intervals by default, which is 0.1 Hz. Full dashboard telemetry such as
+diagnostics, voltage, temperature, and EtherCAT health is pushed at 0.5 Hz by
+default. Wrench data is pushed to the browser at 25 Hz by default, and the
+browser redraws the six charts at 20 Hz by default. On startup, the node prints
+the dashboard address once:
 
 ```text
 Axia80 monitor dashboard listening on http://0.0.0.0:8765/
@@ -263,21 +267,31 @@ The bind address, port, and check period can be changed at launch:
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
   monitor_host:=0.0.0.0 \
   monitor_port:=8765 \
-  monitor_check_period_sec:=10.0
+  monitor_check_period_sec:=10.0 \
+  monitor_telemetry_period_sec:=2.0 \
+  monitor_wrench_push_rate_hz:=25.0 \
+  monitor_chart_refresh_rate_hz:=20.0
 ```
 
 Dashboard sections:
 
 - `System Overview`: overall alert state, wrench stream health, extracted
-  temperature, and extracted voltage.
+  EtherCAT health, extracted temperature, and extracted voltage.
+- `EtherCAT Health`: backend checks derived from the driver's own EtherCAT
+  diagnostics and state values, including master link state, slaves responding,
+  Axia slave online/operational state, status code, and runtime diagnostic SDO
+  state. These values come from the same driver state checks that are logged to
+  the terminal and published through `/diagnostics`.
 - `Manual Bias Control`: confirmed manual calls to
   `/ati_axia80_m20/set_bias` and `/ati_axia80_m20/clear_bias`. After each call,
   the monitor continues checking that `/wrench` updates and force/torque values
   remain finite.
-- `Force / Torque Channels`: six separate low-frequency charts for Fx, Fy, Fz,
-  Tx, Ty, and Tz, each with its latest value.
+- `Force / Torque Channels`: six separate charts for Fx, Fy, Fz, Tx, Ty, and
+  Tz, each with its latest value. WebSocket wrench updates are intended for
+  20-50 Hz, and chart redraws are intended for 10-30 Hz.
 - `ROS 2 Checks`: service type checks, topic type checks, wrench freshness,
-  finite-value validation, and expected hardware interface availability.
+  finite-value validation, expected hardware interface availability, and
+  low-rate EtherCAT health summary.
 - `Hardware Interfaces`: state interfaces reported by
   `/controller_manager/list_hardware_interfaces`, including availability and
   claimed state.

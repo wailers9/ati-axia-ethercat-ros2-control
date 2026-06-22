@@ -86,6 +86,7 @@ private:
   uint64_t sdo_failed_{0};
 
   geometry_msgs::msg::WrenchStamped measurement_;
+  Axia80EtherCATState ethercat_state_;
   uint32_t status_code_raw_{0};
   uint32_t sample_counter_raw_{0};
   std::optional<uint32_t> previous_status_code_;

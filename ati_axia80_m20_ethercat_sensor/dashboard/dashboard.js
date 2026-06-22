@@ -1,5 +1,10 @@
 const state = {
   data: null,
+  history: [],
+  wrench: { values: {} },
+  channelCardsReady: false,
+  chartRefreshHz: 20,
+  lastChartDrawMs: 0,
 };
 
 const channels = [
@@ -24,11 +29,15 @@ function statusLabel(ok) {
   return ok ? '<span class="ok">OK</span>' : '<span class="bad">ALERT</span>';
 }
 
-function update(data) {
+function applyFull(data) {
   state.data = data;
+  state.history = data.history || state.history;
+  state.wrench = data.wrench || state.wrench;
+  state.chartRefreshHz = Number(data.config?.chart_refresh_rate_hz || 20);
   const alerts = data.alerts || [];
   text("overall", alerts.length ? "ALERT" : "OK");
   text("wrenchState", data.wrench && data.wrench.updating && data.wrench.valid ? "OK" : "ALERT");
+  text("ethercatState", data.ethercat && data.ethercat.ok ? "OK" : "ALERT");
   text("temperature", data.metrics.temperature ?? "-");
   text("voltage", data.metrics.voltage ?? "-");
 
@@ -37,7 +46,9 @@ function update(data) {
   alertBox.innerHTML = alerts.map((item) => `<div>${escapeHtml(item)}</div>`).join("");
 
   updateBiasResult(data.last_bias_result);
-  updateChannelCards(data);
+  ensureChannelCards();
+  updateChannelValues();
+  updateEthercat(data.ethercat || {});
 
   document.getElementById("checks").innerHTML = Object.entries(data.checks || {}).map(([name, check]) => `
     <tr>
@@ -63,8 +74,12 @@ function update(data) {
       <td>${escapeHtml(formatValues(item.values))}</td>
     </tr>
   `).join("");
+}
 
-  drawCharts(data.history || []);
+function applyWrench(message) {
+  state.wrench = message.wrench || state.wrench;
+  state.history = message.history || state.history;
+  updateChannelValues();
 }
 
 function updateBiasResult(result) {
@@ -77,16 +92,43 @@ function updateBiasResult(result) {
   element.textContent = `${result.action}: ${status} - ${result.message}`;
 }
 
-function updateChannelCards(data) {
-  const values = data.wrench.values || {};
+function ensureChannelCards() {
+  if (state.channelCardsReady) return;
   document.getElementById("channelCharts").innerHTML = channels.map((channel) => `
     <article class="channel">
       <header>
         <div class="channel-name">${channel.label}</div>
-        <div class="channel-value">${fixed(values[channel.name])} ${channel.unit}</div>
+        <div class="channel-value" id="value-${channel.name}">- ${channel.unit}</div>
       </header>
       <canvas id="chart-${channel.name}" width="420" height="160"></canvas>
     </article>
+  `).join("");
+  state.channelCardsReady = true;
+}
+
+function updateChannelValues() {
+  ensureChannelCards();
+  const values = state.wrench.values || {};
+  channels.forEach((channel) => {
+    const element = document.getElementById(`value-${channel.name}`);
+    if (element) element.textContent = `${fixed(values[channel.name])} ${channel.unit}`;
+  });
+}
+
+function updateEthercat(ethercat) {
+  document.getElementById("ethercatChecks").innerHTML = (ethercat.items || []).map((item) => `
+    <tr>
+      <td>${escapeHtml(item.name)}</td>
+      <td>${statusLabel(item.ok)}</td>
+      <td>${escapeHtml(item.detail)}</td>
+    </tr>
+  `).join("");
+
+  document.getElementById("ethercatValues").innerHTML = Object.entries(ethercat.values || {}).map(([key, value]) => `
+    <tr>
+      <td>${escapeHtml(key)}</td>
+      <td>${escapeHtml(value ?? "-")}</td>
+    </tr>
   `).join("");
 }
 
@@ -177,11 +219,30 @@ async function bias(action) {
 function connect() {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${scheme}://${window.location.host}/ws`);
-  ws.onmessage = (event) => update(JSON.parse(event.data));
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (!message.type) {
+      applyFull(message);
+    } else if (message.type === "full") {
+      applyFull(message.state);
+    } else if (message.type === "wrench") {
+      applyWrench(message);
+    }
+  };
   ws.onclose = () => setTimeout(connect, 1500);
+}
+
+function chartLoop(timestampMs) {
+  const minPeriodMs = 1000 / Math.max(1, state.chartRefreshHz || 20);
+  if (timestampMs - state.lastChartDrawMs >= minPeriodMs) {
+    state.lastChartDrawMs = timestampMs;
+    drawCharts(state.history || []);
+  }
+  window.requestAnimationFrame(chartLoop);
 }
 
 document.getElementById("setBias").addEventListener("click", () => bias("set"));
 document.getElementById("clearBias").addEventListener("click", () => bias("clear"));
-window.addEventListener("resize", () => state.data && drawCharts(state.data.history || []));
+window.addEventListener("resize", () => drawCharts(state.history || []));
 connect();
+window.requestAnimationFrame(chartLoop);

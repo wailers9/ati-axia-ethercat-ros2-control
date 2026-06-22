@@ -43,6 +43,21 @@ def generate_launch_description():
             default_value="10.0",
             description="Low-frequency monitor check period. 10.0 sec is 0.1 Hz.",
         ),
+        DeclareLaunchArgument(
+            "monitor_telemetry_period_sec",
+            default_value="2.0",
+            description="Full dashboard telemetry refresh period. 2.0 sec is 0.5 Hz.",
+        ),
+        DeclareLaunchArgument(
+            "monitor_wrench_push_rate_hz",
+            default_value="25.0",
+            description="WebSocket wrench push rate for chart data. Use 20-50 Hz.",
+        ),
+        DeclareLaunchArgument(
+            "monitor_chart_refresh_rate_hz",
+            default_value="20.0",
+            description="Browser chart redraw rate. Use 10-30 Hz.",
+        ),
     ]
 
     sensor_stack = IncludeLaunchDescription(
@@ -64,6 +79,9 @@ def generate_launch_description():
                 "host": LaunchConfiguration("monitor_host"),
                 "port": LaunchConfiguration("monitor_port"),
                 "check_period_sec": LaunchConfiguration("monitor_check_period_sec"),
+                "telemetry_period_sec": LaunchConfiguration("monitor_telemetry_period_sec"),
+                "wrench_push_rate_hz": LaunchConfiguration("monitor_wrench_push_rate_hz"),
+                "chart_refresh_rate_hz": LaunchConfiguration("monitor_chart_refresh_rate_hz"),
             }
         ],
     )

@@ -62,6 +62,11 @@ bool parse_bool(const std::string & value)
   return value == "true" || value == "True" || value == "1" || value == "yes" || value == "Yes";
 }
 
+std::string bool_text(bool value)
+{
+  return value ? "true" : "false";
+}
+
 uint8_t parse_u8(const std::string & value, const std::string & key, uint8_t max_value)
 {
   const auto parsed = std::stoul(value);
@@ -222,6 +227,7 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
     sample_counter_raw_ = sample.sample_counter;
     status_code_ = static_cast<double>(status_code_raw_);
     sample_counter_ = static_cast<double>(sample_counter_raw_);
+    ethercat_state_ = driver_->state_snapshot();
     handle_status_code_(status_code_raw_);
     check_sample_counter_(sample_counter_raw_);
   } catch (const std::exception & e) {
@@ -397,6 +403,34 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
   status.values.push_back(diagnostic_value("status_code", hex_u32(status_code_raw_)));
   status.values.push_back(diagnostic_value("status_bits", describe_status_bits(status_code_raw_)));
   status.values.push_back(diagnostic_value("sample_counter", std::to_string(sample_counter_raw_)));
+  status.values.push_back(
+    diagnostic_value("ethercat_domain_state_seen", bool_text(ethercat_state_.have_domain_state)));
+  status.values.push_back(
+    diagnostic_value(
+      "ethercat_domain_working_counter",
+      std::to_string(ethercat_state_.domain_working_counter)));
+  status.values.push_back(
+    diagnostic_value("ethercat_domain_wc_state", std::to_string(ethercat_state_.domain_wc_state)));
+  status.values.push_back(
+    diagnostic_value("ethercat_master_state_seen", bool_text(ethercat_state_.have_master_state)));
+  status.values.push_back(
+    diagnostic_value(
+      "ethercat_master_slaves_responding",
+      std::to_string(ethercat_state_.master_slaves_responding)));
+  status.values.push_back(
+    diagnostic_value(
+      "ethercat_master_al_states",
+      std::to_string(ethercat_state_.master_al_states)));
+  status.values.push_back(
+    diagnostic_value("ethercat_master_link_up", bool_text(ethercat_state_.master_link_up)));
+  status.values.push_back(
+    diagnostic_value("ethercat_slave_state_seen", bool_text(ethercat_state_.have_slave_state)));
+  status.values.push_back(
+    diagnostic_value("ethercat_slave_online", bool_text(ethercat_state_.slave_online)));
+  status.values.push_back(
+    diagnostic_value("ethercat_slave_operational", bool_text(ethercat_state_.slave_operational)));
+  status.values.push_back(
+    diagnostic_value("ethercat_slave_al_state", std::to_string(ethercat_state_.slave_al_state)));
 
   const auto publish = [&]() {
     status.values.push_back(diagnostic_value("sdo_success", std::to_string(sdo_success_)));

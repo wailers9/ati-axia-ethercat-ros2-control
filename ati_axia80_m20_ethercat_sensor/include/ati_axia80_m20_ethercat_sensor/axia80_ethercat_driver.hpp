@@ -41,6 +41,23 @@ struct Axia80DiagnosticReadings
   std::string status_message;
 };
 
+struct Axia80EtherCATState
+{
+  bool have_domain_state{false};
+  unsigned int domain_working_counter{0};
+  unsigned int domain_wc_state{0};
+
+  bool have_master_state{false};
+  unsigned int master_slaves_responding{0};
+  unsigned int master_al_states{0};
+  bool master_link_up{false};
+
+  bool have_slave_state{false};
+  bool slave_online{false};
+  bool slave_operational{false};
+  unsigned int slave_al_state{0};
+};
+
 struct Axia80DriverParameters
 {
   unsigned int master_index{0};
@@ -77,6 +94,7 @@ public:
   bool is_active() const;
   Axia80Sample read_once();
   Axia80DiagnosticReadings read_diagnostic_readings() const;
+  Axia80EtherCATState state_snapshot() const;
 
 private:
   void request_master_();

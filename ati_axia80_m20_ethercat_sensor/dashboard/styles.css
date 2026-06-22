@@ -79,6 +79,10 @@ main {
   background: #f7f7f7;
 }
 
+.ethercat-block {
+  background: #fff;
+}
+
 .section-title {
   align-items: center;
   border-bottom: 2px solid #111;
@@ -107,7 +111,7 @@ main {
 .summary {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .summary div {
@@ -142,6 +146,12 @@ main {
   display: grid;
   gap: 20px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.ethercat-layout {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
 }
 
 article {
@@ -237,6 +247,7 @@ th {
 @media (max-width: 900px) {
   header,
   .summary,
+  .ethercat-layout,
   .detail-grid,
   .control-row {
     display: block;

@@ -314,8 +314,11 @@ source install/setup.bash
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
 ```
 
-监测节点默认每 10 秒检查一次，也就是 0.1 Hz。它不直接控制 EtherCAT，
-也不参与实时控制路径。启动后终端会打印一次网页监听地址，默认端口为 `8765`：
+监测节点不直接控制 EtherCAT，也不参与实时控制路径。service、topic、hardware interface
+等查询默认每 10 秒检查一次，也就是 0.1 Hz。完整网页监测数据，例如 diagnostics、电压、
+温度和 EtherCAT health，默认以 0.5 Hz 推送到网页。六维力 wrench 数据默认以 25 Hz
+通过 WebSocket 推送到网页，网页六张图表默认以 20 Hz 重绘。启动后终端会打印一次网页监听地址，
+默认端口为 `8765`：
 
 ```text
 Axia80 monitor dashboard listening on http://0.0.0.0:8765/
@@ -339,18 +342,25 @@ http://<传感器电脑IP>:8765/
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
   monitor_host:=0.0.0.0 \
   monitor_port:=8765 \
-  monitor_check_period_sec:=10.0
+  monitor_check_period_sec:=10.0 \
+  monitor_telemetry_period_sec:=2.0 \
+  monitor_wrench_push_rate_hz:=25.0 \
+  monitor_chart_refresh_rate_hz:=20.0
 ```
 
 网页各部分内容：
 
-- `System Overview`：显示整体报警状态、wrench 数据流状态、从诊断信息提取的温度和电压。
+- `System Overview`：显示整体报警状态、wrench 数据流状态、EtherCAT 状态、从诊断信息提取的温度和电压。
+- `EtherCAT Health`：显示后端根据驱动自身 EtherCAT 诊断和状态值判断出的检查结果，
+  包括 master link、响应从站数、Axia slave online/operational、status code、
+  runtime diagnostic SDO 状态等。这些值来自驱动已经检查并打印到终端的同类状态，
+  同时通过 `/diagnostics` 发布给监测节点。
 - `Manual Bias Control`：提供 `Set Bias` 和 `Clear Bias` 按钮。网页会先弹窗确认，
   再调用 `/ati_axia80_m20/set_bias` 或 `/ati_axia80_m20/clear_bias`。
-- `Force / Torque Channels`：六维力/力矩分开显示，Fx、Fy、Fz、Tx、Ty、Tz 各自一张低频动态图表，
-  并显示每个通道最新值。
+- `Force / Torque Channels`：六维力/力矩分开显示，Fx、Fy、Fz、Tx、Ty、Tz 各自一张动态图表，
+  并显示每个通道最新值。wrench WebSocket 推送建议 20-50 Hz，网页图表刷新建议 10-30 Hz。
 - `ROS 2 Checks`：检查 service 类型、topic 类型、wrench 是否持续更新、force/torque 是否为有限数值、
-  以及预期 hardware state interface 是否可用。
+  预期 hardware state interface 是否可用，以及低频 EtherCAT health 汇总。
 - `Hardware Interfaces`：显示 `/controller_manager/list_hardware_interfaces` 返回的 state interfaces，
   包括接口名、是否 available、是否 claimed。
 - `Diagnostics`：显示 `/diagnostics` 表格。包含 `temperature`、`temp`、`voltage` 或 `volt`

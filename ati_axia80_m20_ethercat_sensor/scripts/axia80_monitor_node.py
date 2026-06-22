@@ -41,6 +41,9 @@ class Axia80MonitorNode(Node):
         self.declare_parameter("host", "0.0.0.0")
         self.declare_parameter("port", 8765)
         self.declare_parameter("check_period_sec", 10.0)
+        self.declare_parameter("telemetry_period_sec", 2.0)
+        self.declare_parameter("wrench_push_rate_hz", 25.0)
+        self.declare_parameter("chart_refresh_rate_hz", 20.0)
         self.declare_parameter("wrench_topic", "/ati_axia80_m20_broadcaster/wrench")
         self.declare_parameter("diagnostics_topic", "/diagnostics")
         self.declare_parameter("set_bias_service", "/ati_axia80_m20/set_bias")
@@ -52,6 +55,9 @@ class Axia80MonitorNode(Node):
         self.host = self.get_parameter("host").value
         self.port = int(self.get_parameter("port").value)
         self.check_period_sec = float(self.get_parameter("check_period_sec").value)
+        self.telemetry_period_sec = float(self.get_parameter("telemetry_period_sec").value)
+        self.wrench_push_rate_hz = float(self.get_parameter("wrench_push_rate_hz").value)
+        self.chart_refresh_rate_hz = float(self.get_parameter("chart_refresh_rate_hz").value)
         self.wrench_topic = self.get_parameter("wrench_topic").value
         self.diagnostics_topic = self.get_parameter("diagnostics_topic").value
         self.set_bias_service_name = self.get_parameter("set_bias_service").value
@@ -66,7 +72,9 @@ class Axia80MonitorNode(Node):
         self._websockets = set()
         self._history = deque(maxlen=history_size)
         self._diagnostics = []
+        self._diagnostic_values = {}
         self._metrics = {"temperature": None, "voltage": None}
+        self._ethercat = self._derive_ethercat_health([], {})
         self._interfaces = []
         self._missing_interfaces = list(EXPECTED_STATE_INTERFACES)
         self._last_wrench_msg = None
@@ -74,6 +82,7 @@ class Axia80MonitorNode(Node):
         self._last_bias_action = None
         self._last_bias_result = None
         self._last_check_monotonic = None
+        self._last_wrench_broadcast_monotonic = 0.0
         self._alerts = []
         self._checks = {}
 
@@ -88,6 +97,8 @@ class Axia80MonitorNode(Node):
 
         period = max(0.1, self.check_period_sec)
         self.create_timer(period, self._run_low_frequency_checks)
+        telemetry_period = max(0.1, self.telemetry_period_sec)
+        self.create_timer(telemetry_period, self._schedule_full_broadcast)
 
         self._run_low_frequency_checks()
         self.get_logger().info(
@@ -108,6 +119,9 @@ class Axia80MonitorNode(Node):
             return {
                 "config": {
                     "check_period_sec": self.check_period_sec,
+                    "telemetry_period_sec": self.telemetry_period_sec,
+                    "wrench_push_rate_hz": self.wrench_push_rate_hz,
+                    "chart_refresh_rate_hz": self.chart_refresh_rate_hz,
                     "wrench_topic": self.wrench_topic,
                     "diagnostics_topic": self.diagnostics_topic,
                     "set_bias_service": self.set_bias_service_name,
@@ -120,7 +134,9 @@ class Axia80MonitorNode(Node):
                 "wrench": self._wrench_snapshot_locked(),
                 "history": list(self._history),
                 "diagnostics": deepcopy(self._diagnostics),
+                "diagnostic_values": deepcopy(self._diagnostic_values),
                 "metrics": deepcopy(self._metrics),
+                "ethercat": deepcopy(self._ethercat),
                 "interfaces": deepcopy(self._interfaces),
                 "missing_interfaces": list(self._missing_interfaces),
                 "last_bias_action": deepcopy(self._last_bias_action),
@@ -169,7 +185,7 @@ class Axia80MonitorNode(Node):
 
         self._store_bias_result(action, result)
         self._run_low_frequency_checks()
-        self._schedule_broadcast()
+        self._schedule_full_broadcast()
         return result
 
     def _store_bias_result(self, action, result):
@@ -199,15 +215,17 @@ class Axia80MonitorNode(Node):
             self._last_wrench_msg = msg
             self._last_wrench_received_monotonic = received
             self._history.append(sample)
-        self._schedule_broadcast()
+        self._schedule_wrench_broadcast()
 
     def _on_diagnostics(self, msg):
         rows = []
+        flat_values = {}
         metrics = {"temperature": None, "voltage": None}
         for status in msg.status:
             values = {}
             for item in status.values:
                 values[item.key] = item.value
+                flat_values[item.key] = item.value
                 key = item.key.lower()
                 if "temperature" in key or key == "temp" or key.endswith(".temp"):
                     metrics["temperature"] = item.value
@@ -223,13 +241,15 @@ class Axia80MonitorNode(Node):
                 }
             )
 
+        ethercat = self._derive_ethercat_health(rows, flat_values)
         with self._lock:
             self._diagnostics = rows
+            self._diagnostic_values = flat_values
+            self._ethercat = ethercat
             if metrics["temperature"] is not None:
                 self._metrics["temperature"] = metrics["temperature"]
             if metrics["voltage"] is not None:
                 self._metrics["voltage"] = metrics["voltage"]
-        self._schedule_broadcast()
 
     def _run_low_frequency_checks(self):
         topics = dict(self.get_topic_names_and_types())
@@ -245,6 +265,7 @@ class Axia80MonitorNode(Node):
             topics, self.diagnostics_topic, "diagnostic_msgs/msg/DiagnosticArray"
         )
         wrench_snapshot = self._wrench_snapshot()
+        ethercat = self._ethercat_snapshot()
 
         checks = {
             "set_bias_service": self._check_row(
@@ -269,6 +290,7 @@ class Axia80MonitorNode(Node):
                 len(self._missing_interfaces) == 0,
                 f"missing {len(self._missing_interfaces)} expected state interfaces",
             ),
+            "ethercat_health": self._check_row(ethercat["ok"], ethercat["summary"]),
         }
 
         alerts = []
@@ -286,7 +308,7 @@ class Axia80MonitorNode(Node):
             future.add_done_callback(self._on_interfaces)
 
         self._log_alerts(alerts)
-        self._schedule_broadcast()
+        self._schedule_full_broadcast()
 
     def _on_interfaces(self, future):
         try:
@@ -324,11 +346,15 @@ class Axia80MonitorNode(Node):
                 self._alerts.append(
                     f"hardware_interfaces: missing {len(missing)} expected state interfaces"
                 )
-        self._schedule_broadcast()
+        self._schedule_full_broadcast()
 
     def _wrench_snapshot(self):
         with self._lock:
             return self._wrench_snapshot_locked()
+
+    def _ethercat_snapshot(self):
+        with self._lock:
+            return deepcopy(self._ethercat)
 
     def _wrench_snapshot_locked(self):
         if self._last_wrench_msg is None:
@@ -385,20 +411,153 @@ class Axia80MonitorNode(Node):
             return f"{name} not found"
         return f"{name}: {', '.join(types)}"
 
+    def _derive_ethercat_health(self, rows, values):
+        items = []
+
+        def add_item(name, ok, detail):
+            items.append({"name": name, "ok": bool(ok), "detail": detail})
+
+        diagnostic_seen = bool(rows)
+        add_item(
+            "driver_diagnostics",
+            diagnostic_seen,
+            "driver diagnostics received" if diagnostic_seen else "no /diagnostics message yet",
+        )
+
+        link_up = self._parse_bool(values.get("ethercat_master_link_up"))
+        add_item(
+            "master_link",
+            link_up is True,
+            self._value_detail("ethercat_master_link_up", values.get("ethercat_master_link_up")),
+        )
+
+        slaves = values.get("ethercat_master_slaves_responding")
+        add_item(
+            "slaves_responding",
+            self._parse_number(slaves) is not None and self._parse_number(slaves) > 0,
+            self._value_detail("ethercat_master_slaves_responding", slaves),
+        )
+
+        slave_online = self._parse_bool(values.get("ethercat_slave_online"))
+        add_item(
+            "slave_online",
+            slave_online is True,
+            self._value_detail("ethercat_slave_online", values.get("ethercat_slave_online")),
+        )
+
+        slave_operational = self._parse_bool(values.get("ethercat_slave_operational"))
+        add_item(
+            "slave_operational",
+            slave_operational is True,
+            self._value_detail(
+                "ethercat_slave_operational", values.get("ethercat_slave_operational")
+            ),
+        )
+
+        status_code = self._parse_int(values.get("status_code"))
+        add_item(
+            "status_code",
+            status_code is not None and (status_code & (1 << 31)) == 0,
+            self._value_detail("status_code", values.get("status_code")),
+        )
+
+        runtime_auto_paused = self._parse_bool(values.get("runtime_sdo_auto_paused"))
+        add_item(
+            "runtime_sdo",
+            runtime_auto_paused is not True,
+            self._value_detail("runtime_sdo_auto_paused", values.get("runtime_sdo_auto_paused")),
+        )
+
+        ok = all(item["ok"] for item in items)
+        bad_items = [item["name"] for item in items if not item["ok"]]
+        summary = "EtherCAT diagnostics OK" if ok else "EtherCAT issue: " + ", ".join(bad_items)
+        return {
+            "ok": ok,
+            "summary": summary,
+            "items": items,
+            "values": {
+                key: values.get(key)
+                for key in (
+                    "ethercat_domain_working_counter",
+                    "ethercat_domain_wc_state",
+                    "ethercat_master_slaves_responding",
+                    "ethercat_master_al_states",
+                    "ethercat_master_link_up",
+                    "ethercat_slave_online",
+                    "ethercat_slave_operational",
+                    "ethercat_slave_al_state",
+                    "status_code",
+                    "status_bits",
+                    "diagnostic_status_message",
+                    "runtime_sdo_last_elapsed_us",
+                    "runtime_sdo_auto_paused",
+                    "runtime_sdo_pause_reason",
+                )
+            },
+        }
+
+    @staticmethod
+    def _value_detail(name, value):
+        if value is None or value == "":
+            return f"{name} not reported"
+        return f"{name}={value}"
+
+    @staticmethod
+    def _parse_bool(value):
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if text in {"true", "1", "yes", "up", "online", "operational"}:
+            return True
+        if text in {"false", "0", "no", "down", "offline"}:
+            return False
+        return None
+
+    @staticmethod
+    def _parse_number(value):
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_int(value):
+        try:
+            return int(str(value).strip(), 0)
+        except (TypeError, ValueError):
+            return None
+
     def _log_alerts(self, alerts):
         if alerts:
             self.get_logger().warning("Axia80 monitor alerts: " + "; ".join(alerts))
         else:
             self.get_logger().info("Axia80 monitor checks OK")
 
-    def _schedule_broadcast(self):
+    def _schedule_full_broadcast(self):
         if self._loop is None or not self._websockets:
             return
-        state = self.dashboard_state()
-        asyncio.run_coroutine_threadsafe(self._broadcast(state), self._loop)
+        payload = {"type": "full", "state": self.dashboard_state()}
+        asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
 
-    async def _broadcast(self, state):
-        payload = json.dumps(state)
+    def _schedule_wrench_broadcast(self):
+        if self._loop is None or not self._websockets:
+            return
+        now = time.monotonic()
+        min_period = 1.0 / max(1.0, self.wrench_push_rate_hz)
+        if now - self._last_wrench_broadcast_monotonic < min_period:
+            return
+        self._last_wrench_broadcast_monotonic = now
+        with self._lock:
+            payload = {
+                "type": "wrench",
+                "wrench": self._wrench_snapshot_locked(),
+                "history": list(self._history),
+                "server_time": time.time(),
+            }
+        asyncio.run_coroutine_threadsafe(self._broadcast(payload), self._loop)
+
+    async def _broadcast(self, message):
+        payload = json.dumps(message)
         stale = []
         for ws in list(self._websockets):
             try:
@@ -443,7 +602,7 @@ def make_app(node):
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
         node.add_websocket(ws)
-        await ws.send_str(json.dumps(node.dashboard_state()))
+        await ws.send_str(json.dumps({"type": "full", "state": node.dashboard_state()}))
         async for message in ws:
             if message.type == WSMsgType.ERROR:
                 break

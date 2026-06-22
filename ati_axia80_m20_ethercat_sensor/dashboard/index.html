@@ -34,6 +34,10 @@
             <strong id="wrenchState">NO DATA</strong>
           </div>
           <div>
+            <span>EtherCAT</span>
+            <strong id="ethercatState">UNKNOWN</strong>
+          </div>
+          <div>
             <span>Temperature</span>
             <strong id="temperature">-</strong>
           </div>
@@ -46,9 +50,30 @@
 
       <section id="alerts" class="alerts hidden"></section>
 
-      <section class="section-block control-block">
+      <section class="section-block ethercat-block">
         <div class="section-title">
           <span>02</span>
+          <h2>EtherCAT Health</h2>
+        </div>
+        <div class="ethercat-layout">
+          <table>
+            <thead>
+              <tr><th>Check</th><th>Status</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="ethercatChecks"></tbody>
+          </table>
+          <table>
+            <thead>
+              <tr><th>Driver Value</th><th>Latest</th></tr>
+            </thead>
+            <tbody id="ethercatValues"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block control-block">
+        <div class="section-title">
+          <span>03</span>
           <h2>Manual Bias Control</h2>
         </div>
         <div class="control-row">
@@ -59,7 +84,7 @@
 
       <section class="section-block">
         <div class="section-title">
-          <span>03</span>
+          <span>04</span>
           <h2>Force / Torque Channels</h2>
         </div>
         <div class="channel-grid" id="channelCharts"></div>
@@ -67,7 +92,7 @@
 
       <section class="section-block">
         <div class="section-title">
-          <span>04</span>
+          <span>05</span>
           <h2>ROS 2 Checks</h2>
         </div>
         <div class="table-wrap">
@@ -83,7 +108,7 @@
       <section class="section-block detail-grid">
         <article>
           <div class="section-title compact">
-            <span>05</span>
+            <span>06</span>
             <h2>Hardware Interfaces</h2>
           </div>
           <table>
@@ -96,7 +121,7 @@
 
         <article>
           <div class="section-title compact">
-            <span>06</span>
+            <span>07</span>
             <h2>Diagnostics</h2>
           </div>
           <table>
