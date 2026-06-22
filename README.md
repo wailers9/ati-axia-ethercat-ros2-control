@@ -30,6 +30,9 @@ master. It publishes `geometry_msgs/msg/WrenchStamped` data through
 - Provides manual bias services:
   - `/<sensor_name>/set_bias`
   - `/<sensor_name>/clear_bias`
+- Provides a low-frequency Web monitor dashboard that checks ROS 2 services,
+  topics, hardware interfaces, wrench freshness, finite force/torque values,
+  and diagnostics without touching the EtherCAT real-time control path.
 
 ## Dependencies
 
@@ -52,9 +55,13 @@ sudo apt-get install -y \
   ros-jazzy-ros2-control \
   ros-jazzy-ros2-controllers \
   ros-jazzy-controller-manager \
+  ros-jazzy-controller-manager-msgs \
+  ros-jazzy-diagnostic-msgs \
   ros-jazzy-force-torque-sensor-broadcaster \
   ros-jazzy-robot-state-publisher \
-  ros-jazzy-xacro
+  ros-jazzy-rclpy \
+  ros-jazzy-xacro \
+  python3-aiohttp
 ```
 
 EtherCAT master and development library installation depends on your system.
@@ -195,6 +202,88 @@ Relationship to `/etc/ethercat.conf`:
 - `master_index` decides which IgH/EtherLab master the ROS 2 plugin requests.
 - `slave_position` / `slave_alias` decide which ATI Axia slave the plugin uses
   under that master.
+
+## Web Monitor Dashboard
+
+Use the full launch when you want one command to start the existing sensor
+stack, wrench publisher, and the monitor dashboard:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/ros2_ws/install/setup.bash
+
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
+  master_index:=0 \
+  slave_position:=0 \
+  slave_alias:=0
+```
+
+After cloning this repository from GitHub on a new machine, the minimal monitor
+startup sequence is:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ros-jazzy-rclpy \
+  ros-jazzy-diagnostic-msgs \
+  ros-jazzy-controller-manager-msgs \
+  python3-aiohttp
+
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install --packages-select ati_axia80_m20_ethercat_sensor
+source install/setup.bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
+```
+
+The monitor checks at 10 second intervals by default, which is 0.1 Hz. It does
+not control EtherCAT and does not participate in the real-time control path. On
+startup, the node prints the dashboard address once:
+
+```text
+Axia80 monitor dashboard listening on http://0.0.0.0:8765/
+```
+
+Open the dashboard locally at:
+
+```text
+http://127.0.0.1:8765/
+```
+
+From another machine on the same network, use:
+
+```text
+http://<sensor-computer-ip>:8765/
+```
+
+The bind address, port, and check period can be changed at launch:
+
+```bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
+  monitor_host:=0.0.0.0 \
+  monitor_port:=8765 \
+  monitor_check_period_sec:=10.0
+```
+
+Dashboard sections:
+
+- `System Overview`: overall alert state, wrench stream health, extracted
+  temperature, and extracted voltage.
+- `Manual Bias Control`: confirmed manual calls to
+  `/ati_axia80_m20/set_bias` and `/ati_axia80_m20/clear_bias`. After each call,
+  the monitor continues checking that `/wrench` updates and force/torque values
+  remain finite.
+- `Force / Torque Channels`: six separate low-frequency charts for Fx, Fy, Fz,
+  Tx, Ty, and Tz, each with its latest value.
+- `ROS 2 Checks`: service type checks, topic type checks, wrench freshness,
+  finite-value validation, and expected hardware interface availability.
+- `Hardware Interfaces`: state interfaces reported by
+  `/controller_manager/list_hardware_interfaces`, including availability and
+  claimed state.
+- `Diagnostics`: `/diagnostics` table. Diagnostic keys containing
+  `temperature`, `temp`, `voltage`, or `volt` are also promoted to the overview
+  metrics.
 
 ## Force/Torque Topic
 
