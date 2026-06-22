@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ATI Axia80-M20 Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>ATI Axia80-M20 Monitor</h1>
+        <p id="subtitle">ROS 2 EtherCAT sensor status dashboard</p>
+      </div>
+      <div class="actions">
+        <button id="setBias">Set Bias</button>
+        <button id="clearBias">Clear Bias</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="section-block overview-block">
+        <div class="section-title">
+          <span>01</span>
+          <h2>System Overview</h2>
+        </div>
+        <div class="summary">
+          <div>
+            <span>Overall</span>
+            <strong id="overall">UNKNOWN</strong>
+          </div>
+          <div>
+            <span>Wrench</span>
+            <strong id="wrenchState">NO DATA</strong>
+          </div>
+          <div>
+            <span>Temperature</span>
+            <strong id="temperature">-</strong>
+          </div>
+          <div>
+            <span>Voltage</span>
+            <strong id="voltage">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section id="alerts" class="alerts hidden"></section>
+
+      <section class="section-block control-block">
+        <div class="section-title">
+          <span>02</span>
+          <h2>Manual Bias Control</h2>
+        </div>
+        <div class="control-row">
+          <p>Bias actions are sent through ROS 2 services after browser confirmation.</p>
+          <div id="biasResult" class="bias-result">No bias action yet</div>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-title">
+          <span>03</span>
+          <h2>Force / Torque Channels</h2>
+        </div>
+        <div class="channel-grid" id="channelCharts"></div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-title">
+          <span>04</span>
+          <h2>ROS 2 Checks</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Item</th><th>Status</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="checks"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section-block detail-grid">
+        <article>
+          <div class="section-title compact">
+            <span>05</span>
+            <h2>Hardware Interfaces</h2>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Available</th><th>Claimed</th></tr>
+            </thead>
+            <tbody id="interfaces"></tbody>
+          </table>
+        </article>
+
+        <article>
+          <div class="section-title compact">
+            <span>06</span>
+            <h2>Diagnostics</h2>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Level</th><th>Message</th><th>Values</th></tr>
+            </thead>
+            <tbody id="diagnostics"></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>
