@@ -55,7 +55,13 @@ pluginlib_export_plugin_description_file(
   hardware_interface ros2_control/ati_axia80_m20_ethercat_sensor.xml)
 
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY config examples launch ros2_control urdf DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config dashboard examples launch ros2_control urdf DESTINATION share/${PROJECT_NAME})
+
+install(
+  PROGRAMS
+    scripts/axia80_monitor_node.py
+  DESTINATION lib/${PROJECT_NAME}
+)
 
 install(
   TARGETS ${PROJECT_NAME}

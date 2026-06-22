@@ -290,6 +290,75 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 启动阶段 calibration SDO 发生在实时 read loop 之前；如果激活阶段 SDO 耗时超过
 500 ms，驱动会打印告警。
 
+## Web 监测系统
+
+保留原有 demo launch 的同时，可以用 full launch 一键启动传感器、wrench 发布和监测网页：
+
+```bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
+```
+
+从 GitHub 拉取项目到新机器后，推荐按下面顺序安装额外依赖、构建、source 工作区并启动：
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ros-jazzy-rclpy \
+  ros-jazzy-diagnostic-msgs \
+  ros-jazzy-controller-manager-msgs \
+  python3-aiohttp
+
+cd ~/starman/ati-axia-ethercat-ros2-control
+colcon build --packages-select ati_axia80_m20_ethercat_sensor
+source install/setup.bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
+```
+
+监测节点默认每 10 秒检查一次，也就是 0.1 Hz。它不直接控制 EtherCAT，
+也不参与实时控制路径。启动后终端会打印一次网页监听地址，默认端口为 `8765`：
+
+```text
+Axia80 monitor dashboard listening on http://0.0.0.0:8765/
+```
+
+本机访问：
+
+```text
+http://127.0.0.1:8765/
+```
+
+局域网其它设备访问：
+
+```text
+http://<传感器电脑IP>:8765/
+```
+
+可通过参数修改监听地址、端口和低频检查周期：
+
+```bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
+  monitor_host:=0.0.0.0 \
+  monitor_port:=8765 \
+  monitor_check_period_sec:=10.0
+```
+
+网页各部分内容：
+
+- `System Overview`：显示整体报警状态、wrench 数据流状态、从诊断信息提取的温度和电压。
+- `Manual Bias Control`：提供 `Set Bias` 和 `Clear Bias` 按钮。网页会先弹窗确认，
+  再调用 `/ati_axia80_m20/set_bias` 或 `/ati_axia80_m20/clear_bias`。
+- `Force / Torque Channels`：六维力/力矩分开显示，Fx、Fy、Fz、Tx、Ty、Tz 各自一张低频动态图表，
+  并显示每个通道最新值。
+- `ROS 2 Checks`：检查 service 类型、topic 类型、wrench 是否持续更新、force/torque 是否为有限数值、
+  以及预期 hardware state interface 是否可用。
+- `Hardware Interfaces`：显示 `/controller_manager/list_hardware_interfaces` 返回的 state interfaces，
+  包括接口名、是否 available、是否 claimed。
+- `Diagnostics`：显示 `/diagnostics` 表格。包含 `temperature`、`temp`、`voltage` 或 `volt`
+  的诊断字段会同时提升到顶部 Overview 指标。
+
+网页中的 `Set Bias` 和 `Clear Bias` 按钮会先弹窗确认，再调用对应 ROS service。
+调用完成后监测节点会继续检查 wrench 是否更新、force/torque 是否仍为有效数值。
+
 ## 在自己的机器人描述中使用
 
 在你的机器人 xacro 中 include 本包的 xacro：
