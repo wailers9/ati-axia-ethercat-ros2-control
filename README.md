@@ -7,6 +7,14 @@ master. It publishes `geometry_msgs/msg/WrenchStamped` data through
 
 [Chinese documentation](README.zh-CN.md)
 
+## System Architecture
+
+The architecture below shows how the ATI Axia80-M20 EtherCAT sensor, IgH/EtherLab
+master, `ros2_control` hardware interface, ROS 2 controllers, diagnostics, and
+Web monitor fit together.
+
+<img width="1608" height="570" alt="System architecture diagram for the ATI Axia80-M20 EtherCAT ros2_control sensor and Web monitor" src="https://github.com/user-attachments/assets/207f41a4-86e9-4500-bb86-be369d384e4d" />
+
 ## Features
 
 - Loads as a `hardware_interface::SensorInterface` through `controller_manager`.
@@ -272,6 +280,19 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
   monitor_wrench_push_rate_hz:=25.0 \
   monitor_chart_refresh_rate_hz:=20.0
 ```
+
+### Dashboard Screenshots
+
+Main dashboard view showing the system overview, EtherCAT health, bias controls,
+force/torque channel charts, ROS 2 checks, hardware interfaces, and diagnostics.
+
+<img width="2292" height="1116" alt="Main Web monitor dashboard showing overview cards, EtherCAT health, bias controls, force and torque charts, ROS checks, hardware interfaces, and diagnostics" src="https://github.com/user-attachments/assets/02590758-d11e-453f-80be-697ad2a45444" />
+
+Detailed dashboard view showing the low-rate ROS 2 checks and diagnostics tables
+used to verify service availability, topic health, interface availability, and
+driver diagnostics.
+
+<img width="2290" height="531" alt="Web monitor dashboard detail view showing ROS 2 checks and diagnostics tables" src="https://github.com/user-attachments/assets/f60adbba-144a-4aff-aa8b-e74e52524dc3" />
 
 Dashboard sections:
 
@@ -552,7 +573,3 @@ TxPDO `0x1A00`:
   `counts_per_force` and `counts_per_torque`, then test PDO communication.
 - `failed to request EtherCAT master`: check that the EtherCAT service is
   running and that the current user has permission to access the master.
-<img width="1608" height="570" alt="QQ_1782178684282" src="https://github.com/user-attachments/assets/207f41a4-86e9-4500-bb86-be369d384e4d" />
-<img width="2292" height="1116" alt="QQ_1782179510140" src="https://github.com/user-attachments/assets/02590758-d11e-453f-80be-697ad2a45444" />
-<img width="2290" height="531" alt="QQ_1782179524345" src="https://github.com/user-attachments/assets/f60adbba-144a-4aff-aa8b-e74e52524dc3" />
-
