@@ -552,3 +552,4 @@ TxPDO `0x1A00`:
   `counts_per_force` and `counts_per_torque`, then test PDO communication.
 - `failed to request EtherCAT master`: check that the EtherCAT service is
   running and that the current user has permission to access the master.
+<img width="1608" height="570" alt="QQ_1782178684282" src="https://github.com/user-attachments/assets/207f41a4-86e9-4500-bb86-be369d384e4d" />
