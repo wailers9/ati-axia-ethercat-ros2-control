@@ -553,3 +553,6 @@ TxPDO `0x1A00`:
 - `failed to request EtherCAT master`: check that the EtherCAT service is
   running and that the current user has permission to access the master.
 <img width="1608" height="570" alt="QQ_1782178684282" src="https://github.com/user-attachments/assets/207f41a4-86e9-4500-bb86-be369d384e4d" />
+<img width="2292" height="1116" alt="QQ_1782179510140" src="https://github.com/user-attachments/assets/02590758-d11e-453f-80be-697ad2a45444" />
+<img width="2290" height="531" alt="QQ_1782179524345" src="https://github.com/user-attachments/assets/f60adbba-144a-4aff-aa8b-e74e52524dc3" />
+
