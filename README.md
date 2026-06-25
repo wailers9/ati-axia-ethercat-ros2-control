@@ -30,6 +30,14 @@ Web monitor fit together.
 - Keeps `sample_counter` checking in `read()`, but publishes one-second
   repeat/jump statistics and severity through `/diagnostics` instead of logging
   each discontinuity from the real-time loop.
+- Uses a small synchronized real-time snapshot for diagnostics, so the 1 Hz
+  publisher never reads mutable PDO/driver state concurrently.
+- Publishes four independent diagnostic entries:
+  - `Axia80 EtherCAT communication`
+  - `Axia80 sample counter`
+  - `Axia80 runtime SDO diagnostics`
+  - `Axia80 sensor status code`
+  Runtime SDO `STALE` therefore cannot hide a sample-counter `WARN` or `ERROR`.
 - Optionally reads force/torque scale factors from SDO `0x2021:0x37` /
   `0x2021:0x38`, plus serial number, calibration part number, calibration time,
   and active calibration slot.
@@ -78,6 +86,21 @@ sudo apt-get install -y \
 EtherCAT master and development library installation depends on your system.
 Confirm that CMake can find `ecrt.h` and `libethercat.so` before building this
 package.
+
+## Automated Tests
+
+Hardware-independent GoogleTests cover parameter validation, sample-counter
+statistics and rollover, independent diagnostic levels, inactive/active bias
+behavior through a mock driver, and pure status/formatting/boolean helpers.
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install --packages-select ati_axia80_m20_ethercat_sensor
+colcon test --packages-select ati_axia80_m20_ethercat_sensor --event-handlers console_direct+
+colcon test-result --verbose
+```
+
+These pre-hardware tests do not request an EtherCAT master or require a sensor.
 
 ## Clone and Build
 
@@ -476,7 +499,9 @@ ros2 control list_hardware_interfaces
 ros2 topic echo /ati_axia80_m20_broadcaster/wrench
 ```
 
-Expected `/diagnostics` key values include:
+`/diagnostics` publishes separate communication, sample-counter, runtime-SDO,
+and sensor-status rows, so their severity levels remain independent. Expected
+key values include:
 
 ```text
 status_code

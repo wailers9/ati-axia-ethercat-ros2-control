@@ -30,6 +30,10 @@ function statusLabel(ok) {
   return ok ? '<span class="ok">OK</span>' : '<span class="bad">ALERT</span>';
 }
 
+function diagnosticLevel(level) {
+  return ["OK", "WARN", "ERROR", "STALE"][Number(level)] || `UNKNOWN(${level})`;
+}
+
 function applyFull(data) {
   state.data = data;
   state.history = data.history || state.history;
@@ -72,7 +76,7 @@ function applyFull(data) {
   document.getElementById("diagnostics").innerHTML = (data.diagnostics || []).map((item) => `
     <tr>
       <td>${escapeHtml(item.name)}</td>
-      <td>${item.level}</td>
+      <td class="${item.level === 0 ? "ok" : "bad"}">${escapeHtml(diagnosticLevel(item.level))}</td>
       <td>${escapeHtml(item.message)}</td>
       <td>${escapeHtml(formatValues(item.values))}</td>
     </tr>

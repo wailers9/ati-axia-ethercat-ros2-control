@@ -16,6 +16,9 @@ EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
   - `sample_counter`
 - `read()` 中保留 sample counter 检查，仅累计统计量，每秒通过 `/diagnostics`
   发布，不再逐次打印告警。
+- 实时读取和低频 diagnostics 之间通过同步保护的轻量快照传递状态。
+- diagnostics 分为 communication、sample counter、runtime SDO 和 sensor status
+  四个独立状态项。
 - 可选从 SDO `0x2021:0x37` / `0x2021:0x38` 读取 force/torque 缩放比例。
 - 防止 `counts_per_force` 和 `counts_per_torque` 为 0 或无效值导致除零。
 - 提供手动 bias 服务：
@@ -50,6 +53,15 @@ sudo apt-get install -y \
 
 EtherCAT master 和开发库的安装方式取决于你的系统环境。确认 `ecrt.h` 和
 `libethercat.so` 能被 CMake 找到后再构建本包。
+
+## 自动化测试
+
+无需真实硬件的 GoogleTest 覆盖参数解析、sample counter 统计、独立 diagnostics
+level、mock driver bias 行为和纯函数：
+
+```bash
+colcon test --packages-select ati_axia80_m20_ethercat_sensor
+```
 
 ## 克隆和构建
 

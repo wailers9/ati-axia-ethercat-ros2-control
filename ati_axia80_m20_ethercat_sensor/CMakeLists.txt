@@ -35,6 +35,7 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
 )
 
 add_library(${PROJECT_NAME} SHARED
+  src/axia80_diagnostics.cpp
   src/axia80_ethercat_config.cpp
   src/axia80_ethercat_driver.cpp
   src/axia80_m20_ethercat_sensor.cpp
@@ -50,6 +51,17 @@ target_include_directories(${PROJECT_NAME}
 ament_target_dependencies(${PROJECT_NAME} ${THIS_PACKAGE_INCLUDE_DEPENDS})
 target_link_libraries(${PROJECT_NAME} ${ECRT_LIBRARY})
 target_compile_definitions(${PROJECT_NAME} PUBLIC "PLUGINLIB__DISABLE_BOOST_FUNCTIONS")
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_axia80_diagnostics test/test_axia80_diagnostics.cpp)
+  target_include_directories(test_axia80_diagnostics PRIVATE
+    include
+    ${ECRT_INCLUDE_DIR}
+  )
+  target_link_libraries(test_axia80_diagnostics ${PROJECT_NAME})
+  ament_target_dependencies(test_axia80_diagnostics diagnostic_msgs)
+endif()
 
 pluginlib_export_plugin_description_file(
   hardware_interface ros2_control/ati_axia80_m20_ethercat_sensor.xml)

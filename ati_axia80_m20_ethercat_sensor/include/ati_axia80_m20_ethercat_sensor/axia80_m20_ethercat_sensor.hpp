@@ -16,6 +16,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
+#include "ati_axia80_m20_ethercat_sensor/axia80_diagnostics.hpp"
 #include "ati_axia80_m20_ethercat_sensor/axia80_ethercat_driver.hpp"
 
 namespace ati_axia80_m20_ethercat_sensor
@@ -38,26 +39,12 @@ struct RuntimeDiagnosticSdoResult
   uint64_t elapsed_us{0};
 };
 
-struct SampleCounterDiagnostics
+struct RealtimeDiagnosticSnapshot
 {
-  uint8_t level{0};
-  std::string message{"sample counter OK"};
-  double elapsed_sec{1.0};
-  double expected_sensor_rate_hz{975.0};
-  double expected_read_rate_hz{975.0};
-  double expected_repeats_per_sec{0.0};
-  double actual_repeats_per_sec{0.0};
-  double expected_skipped_samples_per_sec{0.0};
-  double expected_jump_events_per_sec{0.0};
-  double actual_skipped_samples_per_sec{0.0};
-  double actual_jump_events_per_sec{0.0};
-  uint64_t repeated_reads{0};
-  uint64_t skipped_samples{0};
-  uint64_t jump_events{0};
-  uint32_t max_delta{0};
-  uint32_t large_jump_threshold{10};
-  uint32_t consecutive_repeats{0};
-  uint32_t max_consecutive_repeats{0};
+  bool driver_active{false};
+  uint32_t status_code{0};
+  uint32_t sample_counter{0};
+  Axia80EtherCATState ethercat;
 };
 
 class Axia80M20EtherCATSensor : public hardware_interface::SensorInterface
@@ -90,7 +77,7 @@ private:
   bool driver_ready_() const;
 
   Axia80DriverParameters parameters_;
-  std::unique_ptr<Axia80EtherCATDriver> driver_;
+  std::unique_ptr<Axia80DriverInterface> driver_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr set_bias_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_bias_service_;
   rclcpp::Publisher<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_publisher_;
@@ -109,21 +96,16 @@ private:
   uint64_t sdo_failed_{0};
   double expected_sensor_rate_hz_{975.0};
   double expected_read_rate_hz_{975.0};
+  mutable std::mutex realtime_snapshot_mutex_;
+  RealtimeDiagnosticSnapshot realtime_snapshot_;
   mutable std::mutex sample_counter_mutex_;
   std::chrono::steady_clock::time_point sample_counter_window_start_{};
-  uint64_t repeated_reads_window_{0};
-  uint64_t skipped_samples_window_{0};
-  uint64_t jump_events_window_{0};
-  uint32_t max_delta_window_{0};
-  uint32_t consecutive_repeats_{0};
-  uint32_t max_consecutive_repeats_window_{0};
+  SampleCounterState sample_counter_state_;
 
   geometry_msgs::msg::WrenchStamped measurement_;
-  Axia80EtherCATState ethercat_state_;
   uint32_t status_code_raw_{0};
   uint32_t sample_counter_raw_{0};
   std::optional<uint32_t> previous_status_code_;
-  std::optional<uint32_t> previous_sample_counter_;
   double timestamp_sec_{0.0};
   double timestamp_nanosec_{0.0};
   double status_code_{0.0};

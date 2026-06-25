@@ -16,6 +16,14 @@ EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
   - `sample_counter`
 - `read()` 中保留 `sample_counter` 检查，但不再逐次打印重复/跳变告警；统计结果每秒
   发布到 `/diagnostics`。
+- 实时读取路径只更新一个带同步保护的轻量诊断快照，1 Hz diagnostics 只读取该快照，
+  不再并发读取正在变化的 PDO/driver 状态。
+- `/diagnostics` 拆分为四个独立状态项：
+  - `Axia80 EtherCAT communication`
+  - `Axia80 sample counter`
+  - `Axia80 runtime SDO diagnostics`
+  - `Axia80 sensor status code`
+  因此 runtime SDO 的 `STALE` 不会覆盖 sample counter 的 `WARN` 或 `ERROR`。
 - `status_code` 快速抖动以及 `read()` 失败日志均带 throttle，避免高频刷屏。
 - 可选从 SDO `0x2021:0x37` / `0x2021:0x38` 读取 force/torque 缩放比例。
 - 防止 `counts_per_force` 和 `counts_per_torque` 为 0 或无效值导致除零。
@@ -51,6 +59,21 @@ sudo apt-get install -y \
 
 EtherCAT master 和开发库的安装方式取决于你的系统环境。确认 `ecrt.h` 和
 `libethercat.so` 能被 CMake 找到后再构建本包。
+
+## 自动化测试
+
+项目包含无需真实硬件的 GoogleTest，覆盖参数校验、sample counter 统计与回绕、
+独立 diagnostics level、mock driver 下的 bias 状态，以及 status bit、hex 和 bool
+等纯函数。
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install --packages-select ati_axia80_m20_ethercat_sensor
+colcon test --packages-select ati_axia80_m20_ethercat_sensor --event-handlers console_direct+
+colcon test-result --verbose
+```
+
+这些连接真实硬件前的测试不会请求 EtherCAT master，也不需要连接传感器。
 
 ## 克隆和构建
 

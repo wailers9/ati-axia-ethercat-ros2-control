@@ -227,7 +227,7 @@ class Axia80MonitorNode(Node):
             values = {}
             for item in status.values:
                 values[item.key] = item.value
-                flat_values[item.key] = item.value
+                flat_values.setdefault(item.key, item.value)
                 key = item.key.lower()
                 if "temperature" in key or key == "temp" or key.endswith(".temp"):
                     metrics["temperature"] = item.value
@@ -294,6 +294,8 @@ class Axia80MonitorNode(Node):
         )
         wrench_snapshot = self._wrench_snapshot()
         ethercat = self._ethercat_snapshot()
+        with self._lock:
+            diagnostics = deepcopy(self._diagnostics)
 
         checks = {
             "set_bias_service": self._check_row(
@@ -320,6 +322,18 @@ class Axia80MonitorNode(Node):
             ),
             "ethercat_health": self._check_row(ethercat["ok"], ethercat["summary"]),
         }
+        diagnostic_names = {
+            "Axia80 EtherCAT communication": "diagnostic_ethercat_communication",
+            "Axia80 sample counter": "diagnostic_sample_counter",
+            "Axia80 runtime SDO diagnostics": "diagnostic_runtime_sdo",
+            "Axia80 sensor status code": "diagnostic_sensor_status",
+        }
+        for label, check_name in diagnostic_names.items():
+            row = next((item for item in diagnostics if item["name"].endswith(label)), None)
+            checks[check_name] = self._check_row(
+                row is not None and row["level"] == 0,
+                row["message"] if row is not None else f"{label} not reported",
+            )
 
         alerts = []
         for name, check in checks.items():
@@ -482,20 +496,6 @@ class Axia80MonitorNode(Node):
             ),
         )
 
-        status_code = self._parse_int(values.get("status_code"))
-        add_item(
-            "status_code",
-            status_code is not None and (status_code & (1 << 31)) == 0,
-            self._value_detail("status_code", values.get("status_code")),
-        )
-
-        runtime_auto_paused = self._parse_bool(values.get("runtime_sdo_auto_paused"))
-        add_item(
-            "runtime_sdo",
-            runtime_auto_paused is not True,
-            self._value_detail("runtime_sdo_auto_paused", values.get("runtime_sdo_auto_paused")),
-        )
-
         ok = all(item["ok"] for item in items)
         bad_items = [item["name"] for item in items if not item["ok"]]
         summary = "EtherCAT diagnostics OK" if ok else "EtherCAT issue: " + ", ".join(bad_items)
@@ -514,22 +514,6 @@ class Axia80MonitorNode(Node):
                     "ethercat_slave_online",
                     "ethercat_slave_operational",
                     "ethercat_slave_al_state",
-                    "status_code",
-                    "status_bits",
-                    "diagnostic_status_message",
-                    "runtime_sdo_last_elapsed_us",
-                    "runtime_sdo_auto_paused",
-                    "runtime_sdo_pause_reason",
-                    "actual_repeats_per_sec",
-                    "actual_jump_events_per_sec",
-                    "actual_skipped_samples_per_sec",
-                    "expected_repeats_per_sec",
-                    "expected_skipped_samples_per_sec",
-                    "expected_jump_events_per_sec",
-                    "max_delta",
-                    "large_jump_threshold",
-                    "consecutive_repeats",
-                    "sample_counter_status",
                 )
             },
         }

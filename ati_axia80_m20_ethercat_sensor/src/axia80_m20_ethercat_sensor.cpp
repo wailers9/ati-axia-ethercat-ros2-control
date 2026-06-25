@@ -1,14 +1,9 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_m20_ethercat_sensor.hpp"
 
 #include <chrono>
-#include <algorithm>
-#include <cmath>
-#include <iomanip>
 #include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 
 #include "pluginlib/class_list_macros.hpp"
 
@@ -16,98 +11,13 @@ namespace ati_axia80_m20_ethercat_sensor
 {
 namespace
 {
-using Parameters = std::unordered_map<std::string, std::string>;
 using diagnostic_msgs::msg::DiagnosticStatus;
 using diagnostic_msgs::msg::KeyValue;
 using namespace std::chrono_literals;
 
-struct StatusBitDescription
-{
-  uint8_t bit;
-  const char * name;
-  bool error;
-};
-
-constexpr StatusBitDescription STATUS_BITS[] = {
-  {0, "internal temperature out of range", true},
-  {1, "supply voltage out of range", true},
-  {2, "broken gage", true},
-  {3, "busy", true},
-  {5, "hardware or stack error", true},
-  {26, "gage out-of-range warning", true},
-  {27, "gage out of range", true},
-  {28, "simulated error", true},
-  {29, "calibration checksum error", true},
-  {30, "sensing range exceeded", true},
-  {31, "error summary", true},
-};
-
-const std::string & required_param(const Parameters & params, const std::string & key)
-{
-  const auto it = params.find(key);
-  if (it == params.end()) {
-    throw std::runtime_error("missing required hardware parameter '" + key + "'");
-  }
-  return it->second;
-}
-
-std::string optional_param(
-  const Parameters & params, const std::string & key, const std::string & default_value)
-{
-  const auto it = params.find(key);
-  return it == params.end() ? default_value : it->second;
-}
-
-bool parse_bool(const std::string & value)
-{
-  return value == "true" || value == "True" || value == "1" || value == "yes" || value == "Yes";
-}
-
-double sample_rate_hz(uint8_t sample_rate_code)
-{
-  constexpr double SAMPLE_RATES_HZ[] = {487.0, 975.0, 1990.0, 3900.0};
-  return SAMPLE_RATES_HZ[sample_rate_code];
-}
-
 std::string bool_text(bool value)
 {
   return value ? "true" : "false";
-}
-
-uint8_t parse_u8(const std::string & value, const std::string & key, uint8_t max_value)
-{
-  const auto parsed = std::stoul(value);
-  if (parsed > max_value) {
-    throw std::runtime_error("'" + key + "' must be <= " + std::to_string(max_value));
-  }
-  return static_cast<uint8_t>(parsed);
-}
-
-std::string hex_u32(uint32_t value)
-{
-  std::ostringstream stream;
-  stream << "0x" << std::hex << std::setw(8) << std::setfill('0') << value;
-  return stream.str();
-}
-
-std::string describe_status_bits(uint32_t status_code)
-{
-  std::ostringstream stream;
-  bool first = true;
-  for (const auto & bit : STATUS_BITS) {
-    if ((status_code & (uint32_t{1} << bit.bit)) == 0) {
-      continue;
-    }
-    if (!first) {
-      stream << "; ";
-    }
-    stream << "bit " << static_cast<unsigned int>(bit.bit) << " " << bit.name;
-    first = false;
-  }
-  if (first) {
-    return "no active status bits";
-  }
-  return stream.str();
 }
 
 KeyValue diagnostic_value(const std::string & key, const std::string & value)
@@ -236,7 +146,11 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
     sample_counter_raw_ = sample.sample_counter;
     status_code_ = static_cast<double>(status_code_raw_);
     sample_counter_ = static_cast<double>(sample_counter_raw_);
-    ethercat_state_ = driver_->state_snapshot();
+    const auto ethercat_state = driver_->state_snapshot();
+    {
+      std::lock_guard<std::mutex> snapshot_lock(realtime_snapshot_mutex_);
+      realtime_snapshot_ = {true, status_code_raw_, sample_counter_raw_, ethercat_state};
+    }
     handle_status_code_(status_code_raw_);
     check_sample_counter_(sample_counter_raw_);
   } catch (const std::exception & e) {
@@ -256,62 +170,12 @@ void Axia80M20EtherCATSensor::parse_parameters_(
     throw std::runtime_error("hardware description must contain one <sensor> entry");
   }
 
-  const auto & params = hardware_info.sensors[0].parameters;
-  parameters_.master_index = static_cast<unsigned int>(
-    std::stoul(optional_param(params, "master_index", "0")));
-  parameters_.slave.alias = static_cast<uint16_t>(
-    std::stoul(optional_param(params, "slave_alias", "0")));
-  parameters_.slave.position = static_cast<uint16_t>(
-    std::stoul(required_param(params, "slave_position")));
-  parameters_.slave.vendor_id = static_cast<uint32_t>(
-    std::stoul(optional_param(params, "vendor_id", std::to_string(ATI_VENDOR_ID)), nullptr, 0));
-  parameters_.slave.product_code = static_cast<uint32_t>(
-    std::stoul(optional_param(params, "product_code", std::to_string(AXIA_PRODUCT_CODE)), nullptr, 0));
-  parameters_.slave.revision = static_cast<uint32_t>(
-    std::stoul(optional_param(params, "revision", std::to_string(AXIA_REVISION)), nullptr, 0));
-
-  parameters_.read_calibration_sdo =
-    parse_bool(optional_param(params, "read_calibration_sdo", "true"));
-  runtime_diagnostic_sdo_enabled_ =
-    parse_bool(optional_param(params, "runtime_diagnostic_sdo", "true"));
-  const auto runtime_diagnostic_sdo_timeout_ms =
-    std::stoul(optional_param(params, "runtime_diagnostic_sdo_timeout_ms", "5"));
-  if (runtime_diagnostic_sdo_timeout_ms == 0) {
-    throw std::runtime_error("runtime_diagnostic_sdo_timeout_ms must be > 0");
-  }
-  runtime_diagnostic_sdo_timeout_ =
-    std::chrono::milliseconds(runtime_diagnostic_sdo_timeout_ms);
-  parameters_.counts_per_force = std::stod(optional_param(params, "counts_per_force", "1000000"));
-  parameters_.counts_per_torque = std::stod(optional_param(params, "counts_per_torque", "1000000"));
-  if (!std::isfinite(parameters_.counts_per_force) || parameters_.counts_per_force <= 0.0) {
-    throw std::runtime_error("counts_per_force must be a finite positive value");
-  }
-  if (!std::isfinite(parameters_.counts_per_torque) || parameters_.counts_per_torque <= 0.0) {
-    throw std::runtime_error("counts_per_torque must be a finite positive value");
-  }
-
-  parameters_.filter_selection =
-    parse_u8(optional_param(params, "filter_selection", "0"), "filter_selection", 8);
-  parameters_.calibration_slot =
-    parse_u8(optional_param(params, "calibration_slot", "0"), "calibration_slot", 1);
-  parameters_.sample_rate_code =
-    parse_u8(optional_param(params, "sample_rate_code", "1"), "sample_rate_code", 3);
-  expected_sensor_rate_hz_ = std::stod(
-    optional_param(
-      params, "expected_sensor_rate_hz",
-      std::to_string(sample_rate_hz(parameters_.sample_rate_code))));
-  expected_read_rate_hz_ = std::stod(
-    optional_param(params, "expected_read_rate_hz", std::to_string(expected_sensor_rate_hz_)));
-  if (!std::isfinite(expected_sensor_rate_hz_) || expected_sensor_rate_hz_ <= 0.0) {
-    throw std::runtime_error("expected_sensor_rate_hz must be a finite positive value");
-  }
-  if (!std::isfinite(expected_read_rate_hz_) || expected_read_rate_hz_ <= 0.0) {
-    throw std::runtime_error("expected_read_rate_hz must be a finite positive value");
-  }
-  parameters_.set_bias_on_activate =
-    parse_bool(optional_param(params, "set_bias_on_activate", "false"));
-  parameters_.clear_bias_on_activate =
-    parse_bool(optional_param(params, "clear_bias_on_activate", "true"));
+  const auto parsed = parse_hardware_parameters(hardware_info.sensors[0].parameters);
+  parameters_ = parsed.driver;
+  runtime_diagnostic_sdo_enabled_ = parsed.runtime_diagnostic_sdo_enabled;
+  runtime_diagnostic_sdo_timeout_ = parsed.runtime_diagnostic_sdo_timeout;
+  expected_sensor_rate_hz_ = parsed.expected_sensor_rate_hz;
+  expected_read_rate_hz_ = parsed.expected_read_rate_hz;
 }
 
 void Axia80M20EtherCATSensor::reset_state_()
@@ -329,15 +193,13 @@ void Axia80M20EtherCATSensor::reset_state_()
   sample_counter_raw_ = 0;
   previous_status_code_.reset();
   {
+    std::lock_guard<std::mutex> lock(realtime_snapshot_mutex_);
+    realtime_snapshot_ = {};
+  }
+  {
     std::lock_guard<std::mutex> lock(sample_counter_mutex_);
-    previous_sample_counter_.reset();
     sample_counter_window_start_ = std::chrono::steady_clock::now();
-    repeated_reads_window_ = 0;
-    skipped_samples_window_ = 0;
-    jump_events_window_ = 0;
-    max_delta_window_ = 0;
-    consecutive_repeats_ = 0;
-    max_consecutive_repeats_window_ = 0;
+    sample_counter_state_ = {};
   }
   status_code_ = nan;
   sample_counter_ = nan;
@@ -367,20 +229,9 @@ void Axia80M20EtherCATSensor::create_bias_services_()
       std::shared_ptr<std_srvs::srv::Trigger::Response> response)
     {
       std::lock_guard<std::mutex> lock(driver_mutex_);
-      if (!driver_ready_()) {
-        response->success = false;
-        response->message = "ATI Axia80-M20 EtherCAT driver is not active";
-        return;
-      }
-
-      try {
-        driver_->set_bias();
-        response->success = true;
-        response->message = "ATI Axia80-M20 bias set";
-      } catch (const std::exception & e) {
-        response->success = false;
-        response->message = std::string("Failed to set bias: ") + e.what();
-      }
+      const auto result = execute_bias(driver_.get(), true);
+      response->success = result.success;
+      response->message = result.message;
     });
 
   clear_bias_service_ = node->create_service<std_srvs::srv::Trigger>(
@@ -390,20 +241,9 @@ void Axia80M20EtherCATSensor::create_bias_services_()
       std::shared_ptr<std_srvs::srv::Trigger::Response> response)
     {
       std::lock_guard<std::mutex> lock(driver_mutex_);
-      if (!driver_ready_()) {
-        response->success = false;
-        response->message = "ATI Axia80-M20 EtherCAT driver is not active";
-        return;
-      }
-
-      try {
-        driver_->clear_bias();
-        response->success = true;
-        response->message = "ATI Axia80-M20 bias cleared";
-      } catch (const std::exception & e) {
-        response->success = false;
-        response->message = std::string("Failed to clear bias: ") + e.what();
-      }
+      const auto result = execute_bias(driver_.get(), false);
+      response->success = result.success;
+      response->message = result.message;
     });
 }
 
@@ -425,128 +265,121 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
     return;
   }
 
+  RealtimeDiagnosticSnapshot snapshot;
+  {
+    std::lock_guard<std::mutex> lock(realtime_snapshot_mutex_);
+    snapshot = realtime_snapshot_;
+  }
+  const auto sample_diagnostics = sample_counter_diagnostics_();
+
   diagnostic_msgs::msg::DiagnosticArray array;
   array.header.stamp = rclcpp::Clock(RCL_SYSTEM_TIME).now();
 
-  DiagnosticStatus status;
-  status.name = sensor_name_() + ": ATI Axia80-M20";
-  status.hardware_id = sensor_name_();
-  status.level = DiagnosticStatus::STALE;
-  status.message = "driver is not active";
-  status.values.push_back(diagnostic_value("status_code", hex_u32(status_code_raw_)));
-  status.values.push_back(diagnostic_value("status_bits", describe_status_bits(status_code_raw_)));
-  status.values.push_back(diagnostic_value("sample_counter", std::to_string(sample_counter_raw_)));
-  status.values.push_back(
-    diagnostic_value("ethercat_domain_state_seen", bool_text(ethercat_state_.have_domain_state)));
-  status.values.push_back(
-    diagnostic_value(
-      "ethercat_domain_working_counter",
-      std::to_string(ethercat_state_.domain_working_counter)));
-  status.values.push_back(
-    diagnostic_value("ethercat_domain_wc_state", std::to_string(ethercat_state_.domain_wc_state)));
-  status.values.push_back(
-    diagnostic_value("ethercat_master_state_seen", bool_text(ethercat_state_.have_master_state)));
-  status.values.push_back(
-    diagnostic_value(
-      "ethercat_master_slaves_responding",
-      std::to_string(ethercat_state_.master_slaves_responding)));
-  status.values.push_back(
-    diagnostic_value(
-      "ethercat_master_al_states",
-      std::to_string(ethercat_state_.master_al_states)));
-  status.values.push_back(
-    diagnostic_value("ethercat_master_link_up", bool_text(ethercat_state_.master_link_up)));
-  status.values.push_back(
-    diagnostic_value("ethercat_slave_state_seen", bool_text(ethercat_state_.have_slave_state)));
-  status.values.push_back(
-    diagnostic_value("ethercat_slave_online", bool_text(ethercat_state_.slave_online)));
-  status.values.push_back(
-    diagnostic_value("ethercat_slave_operational", bool_text(ethercat_state_.slave_operational)));
-  status.values.push_back(
-    diagnostic_value("ethercat_slave_al_state", std::to_string(ethercat_state_.slave_al_state)));
+  DiagnosticStatus communication;
+  communication.name = sensor_name_() + ": Axia80 EtherCAT communication";
+  communication.hardware_id = sensor_name_();
+  const auto & ethercat = snapshot.ethercat;
+  const bool communication_ok =
+    snapshot.driver_active && ethercat.have_domain_state && ethercat.have_master_state &&
+    ethercat.have_slave_state && ethercat.master_link_up &&
+    ethercat.master_slaves_responding > 0 && ethercat.slave_online &&
+    ethercat.slave_operational;
+  const auto initial_levels = make_independent_diagnostic_levels(
+    snapshot.driver_active, communication_ok, sample_diagnostics.level,
+    DiagnosticStatus::STALE, snapshot.status_code);
+  communication.level = initial_levels.communication;
+  communication.message = snapshot.driver_active ?
+    (communication_ok ? "EtherCAT communication OK" : "EtherCAT communication fault") :
+    "driver is not active";
+  communication.values.push_back(
+    diagnostic_value("ethercat_domain_state_seen", bool_text(ethercat.have_domain_state)));
+  communication.values.push_back(diagnostic_value(
+      "ethercat_domain_working_counter", std::to_string(ethercat.domain_working_counter)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_domain_wc_state", std::to_string(ethercat.domain_wc_state)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_master_state_seen", bool_text(ethercat.have_master_state)));
+  communication.values.push_back(diagnostic_value(
+      "ethercat_master_slaves_responding", std::to_string(ethercat.master_slaves_responding)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_master_al_states", std::to_string(ethercat.master_al_states)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_master_link_up", bool_text(ethercat.master_link_up)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_slave_state_seen", bool_text(ethercat.have_slave_state)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_slave_online", bool_text(ethercat.slave_online)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_slave_operational", bool_text(ethercat.slave_operational)));
+  communication.values.push_back(
+    diagnostic_value("ethercat_slave_al_state", std::to_string(ethercat.slave_al_state)));
 
-  const auto sample_diagnostics = sample_counter_diagnostics_();
-  const auto publish = [&]() {
-    status.values.push_back(
-      diagnostic_value(
-        "expected_sensor_rate_hz", std::to_string(sample_diagnostics.expected_sensor_rate_hz)));
-    status.values.push_back(
-      diagnostic_value(
-        "expected_read_rate_hz", std::to_string(sample_diagnostics.expected_read_rate_hz)));
-    status.values.push_back(
-      diagnostic_value(
-        "sample_counter_window_sec", std::to_string(sample_diagnostics.elapsed_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "expected_repeats_per_sec",
-        std::to_string(sample_diagnostics.expected_repeats_per_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "actual_repeats_per_sec", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
-    status.values.push_back(
-      diagnostic_value("repeat_rate", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "expected_skipped_samples_per_sec",
-        std::to_string(sample_diagnostics.expected_skipped_samples_per_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "expected_jump_events_per_sec",
-        std::to_string(sample_diagnostics.expected_jump_events_per_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "actual_skipped_samples_per_sec",
-        std::to_string(sample_diagnostics.actual_skipped_samples_per_sec)));
-    status.values.push_back(
-      diagnostic_value(
-        "actual_jump_events_per_sec",
-        std::to_string(sample_diagnostics.actual_jump_events_per_sec)));
-    status.values.push_back(
-      diagnostic_value("repeated_reads", std::to_string(sample_diagnostics.repeated_reads)));
-    status.values.push_back(
-      diagnostic_value("skipped_samples", std::to_string(sample_diagnostics.skipped_samples)));
-    status.values.push_back(
-      diagnostic_value("jump_events", std::to_string(sample_diagnostics.jump_events)));
-    status.values.push_back(
-      diagnostic_value("max_delta", std::to_string(sample_diagnostics.max_delta)));
-    status.values.push_back(
-      diagnostic_value(
-        "large_jump_threshold", std::to_string(sample_diagnostics.large_jump_threshold)));
-    status.values.push_back(
-      diagnostic_value(
-        "consecutive_repeats", std::to_string(sample_diagnostics.consecutive_repeats)));
-    status.values.push_back(
-      diagnostic_value(
-        "max_consecutive_repeats",
-        std::to_string(sample_diagnostics.max_consecutive_repeats)));
-    status.values.push_back(
-      diagnostic_value("sample_counter_status", sample_diagnostics.message));
-    if (status.level != DiagnosticStatus::STALE &&
-      sample_diagnostics.level > status.level)
-    {
-      status.level = sample_diagnostics.level;
-    }
-    if (sample_diagnostics.level != DiagnosticStatus::OK) {
-      status.message += "; " + sample_diagnostics.message;
-    }
-    status.values.push_back(diagnostic_value("sdo_success", std::to_string(sdo_success_)));
-    status.values.push_back(diagnostic_value("sdo_skipped", std::to_string(sdo_skipped_)));
-    status.values.push_back(diagnostic_value("sdo_failed", std::to_string(sdo_failed_)));
-    status.values.push_back(
-      diagnostic_value("runtime_sdo_last_elapsed_us", std::to_string(runtime_sdo_last_elapsed_us_)));
-    status.values.push_back(
-      diagnostic_value(
-        "runtime_sdo_consecutive_lock_failures",
-        std::to_string(consecutive_runtime_sdo_lock_failures_)));
-    status.values.push_back(
-      diagnostic_value(
-        "runtime_sdo_auto_paused",
-        runtime_diagnostic_sdo_auto_paused_ ? "true" : "false"));
-    status.values.push_back(
-      diagnostic_value("runtime_sdo_pause_reason", runtime_diagnostic_sdo_pause_reason_));
-    array.status.push_back(status);
-    diagnostics_publisher_->publish(array);
-  };
+  DiagnosticStatus sample_counter;
+  sample_counter.name = sensor_name_() + ": Axia80 sample counter";
+  sample_counter.hardware_id = sensor_name_();
+  sample_counter.level = initial_levels.sample_counter;
+  sample_counter.message = snapshot.driver_active ?
+    sample_diagnostics.message : "driver is not active";
+  sample_counter.values.push_back(
+    diagnostic_value("sample_counter", std::to_string(snapshot.sample_counter)));
+  sample_counter.values.push_back(diagnostic_value(
+      "expected_sensor_rate_hz", std::to_string(sample_diagnostics.expected_sensor_rate_hz)));
+  sample_counter.values.push_back(diagnostic_value(
+      "expected_read_rate_hz", std::to_string(sample_diagnostics.expected_read_rate_hz)));
+  sample_counter.values.push_back(diagnostic_value(
+      "sample_counter_window_sec", std::to_string(sample_diagnostics.elapsed_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "expected_repeats_per_sec", std::to_string(sample_diagnostics.expected_repeats_per_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "actual_repeats_per_sec", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
+  sample_counter.values.push_back(
+    diagnostic_value("repeat_rate", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "expected_skipped_samples_per_sec",
+      std::to_string(sample_diagnostics.expected_skipped_samples_per_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "expected_jump_events_per_sec",
+      std::to_string(sample_diagnostics.expected_jump_events_per_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "actual_skipped_samples_per_sec",
+      std::to_string(sample_diagnostics.actual_skipped_samples_per_sec)));
+  sample_counter.values.push_back(diagnostic_value(
+      "actual_jump_events_per_sec",
+      std::to_string(sample_diagnostics.actual_jump_events_per_sec)));
+  sample_counter.values.push_back(
+    diagnostic_value("repeated_reads", std::to_string(sample_diagnostics.repeated_reads)));
+  sample_counter.values.push_back(
+    diagnostic_value("skipped_samples", std::to_string(sample_diagnostics.skipped_samples)));
+  sample_counter.values.push_back(
+    diagnostic_value("jump_events", std::to_string(sample_diagnostics.jump_events)));
+  sample_counter.values.push_back(
+    diagnostic_value("max_delta", std::to_string(sample_diagnostics.max_delta)));
+  sample_counter.values.push_back(diagnostic_value(
+      "large_jump_threshold", std::to_string(sample_diagnostics.large_jump_threshold)));
+  sample_counter.values.push_back(diagnostic_value(
+      "consecutive_repeats", std::to_string(sample_diagnostics.consecutive_repeats)));
+  sample_counter.values.push_back(diagnostic_value(
+      "max_consecutive_repeats", std::to_string(sample_diagnostics.max_consecutive_repeats)));
+  sample_counter.values.push_back(
+    diagnostic_value("sample_counter_status", sample_diagnostics.message));
+
+  DiagnosticStatus sensor_status;
+  sensor_status.name = sensor_name_() + ": Axia80 sensor status code";
+  sensor_status.hardware_id = sensor_name_();
+  sensor_status.level = initial_levels.sensor_status;
+  sensor_status.message = snapshot.driver_active ?
+    describe_status_bits(snapshot.status_code) : "driver is not active";
+  sensor_status.values.push_back(
+    diagnostic_value("status_code", hex_u32(snapshot.status_code)));
+  sensor_status.values.push_back(
+    diagnostic_value("status_bits", describe_status_bits(snapshot.status_code)));
+
+  DiagnosticStatus runtime_sdo;
+  runtime_sdo.name = sensor_name_() + ": Axia80 runtime SDO diagnostics";
+  runtime_sdo.hardware_id = sensor_name_();
+  runtime_sdo.level = initial_levels.runtime_sdo;
+  runtime_sdo.message = snapshot.driver_active ?
+    "runtime diagnostic SDO has no result yet" : "driver is not active";
 
   std::optional<RuntimeDiagnosticSdoResult> result;
   if (runtime_diagnostic_sdo_future_.valid()) {
@@ -564,22 +397,20 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
           "Runtime diagnostic SDO paused: %s",
           runtime_diagnostic_sdo_pause_reason_.c_str());
       }
-      status.level = DiagnosticStatus::STALE;
-      status.message = runtime_diagnostic_sdo_auto_paused_ ?
+      runtime_sdo.level = DiagnosticStatus::STALE;
+      runtime_sdo.message = runtime_diagnostic_sdo_auto_paused_ ?
         "runtime diagnostic SDO auto-paused: " + runtime_diagnostic_sdo_pause_reason_ :
         "runtime diagnostic SDO still running";
-      publish();
-      return;
-    }
-
-    try {
-      result = runtime_diagnostic_sdo_future_.get();
-    } catch (const std::exception & e) {
-      result = RuntimeDiagnosticSdoResult{
-        RuntimeDiagnosticSdoResult::Outcome::FAILED,
-        {},
-        std::string("runtime diagnostic SDO worker failed: ") + e.what(),
-        0};
+    } else {
+      try {
+        result = runtime_diagnostic_sdo_future_.get();
+      } catch (const std::exception & e) {
+        result = RuntimeDiagnosticSdoResult{
+          RuntimeDiagnosticSdoResult::Outcome::FAILED,
+          {},
+          std::string("runtime diagnostic SDO worker failed: ") + e.what(),
+          0};
+      }
     }
   }
 
@@ -611,20 +442,19 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
       consecutive_runtime_sdo_lock_failures_ = 0;
 
       const auto & readings = result->readings;
-      const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
       const bool diagnostic_error =
         !readings.status_message.empty() && readings.status_message != "No status code errors";
 
-      status.level = (status_error || diagnostic_error) ?
+      runtime_sdo.level = diagnostic_error ?
         DiagnosticStatus::ERROR : DiagnosticStatus::OK;
-      status.message = readings.status_message.empty() ? "No status code errors" :
+      runtime_sdo.message = readings.status_message.empty() ? "No status code errors" :
         readings.status_message;
-      status.values.push_back(
+      runtime_sdo.values.push_back(
         diagnostic_value("supply_voltage_v", std::to_string(readings.supply_voltage_v)));
-      status.values.push_back(
+      runtime_sdo.values.push_back(
         diagnostic_value("gage_temperature_c", std::to_string(readings.gage_temperature_c)));
-      status.values.push_back(
-        diagnostic_value("diagnostic_status_message", status.message));
+      runtime_sdo.values.push_back(
+        diagnostic_value("diagnostic_status_message", runtime_sdo.message));
     } else if (result->outcome == RuntimeDiagnosticSdoResult::Outcome::SKIPPED) {
       ++sdo_skipped_;
       if (result->message == "diagnostic SDO skipped because EtherCAT driver is busy") {
@@ -641,42 +471,50 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
       } else {
         consecutive_runtime_sdo_lock_failures_ = 0;
       }
-      status.level = DiagnosticStatus::STALE;
-      status.message = result->message;
+      runtime_sdo.level = DiagnosticStatus::STALE;
+      runtime_sdo.message = result->message;
     } else {
       ++sdo_failed_;
       consecutive_runtime_sdo_lock_failures_ = 0;
-      status.level = DiagnosticStatus::WARN;
-      status.message = result->message;
+      runtime_sdo.level = DiagnosticStatus::WARN;
+      runtime_sdo.message = result->message;
     }
   }
 
   if (!runtime_diagnostic_sdo_enabled_) {
     ++sdo_skipped_;
-    const bool status_error = (status_code_raw_ & (uint32_t{1} << 31)) != 0;
-    status.level = status_error ? DiagnosticStatus::ERROR : DiagnosticStatus::OK;
-    status.message = "runtime diagnostic SDO disabled";
-    publish();
-    return;
-  }
-
-  if (runtime_diagnostic_sdo_auto_paused_) {
+    runtime_sdo.level = DiagnosticStatus::STALE;
+    runtime_sdo.message = "runtime diagnostic SDO disabled";
+  } else if (runtime_diagnostic_sdo_auto_paused_) {
     ++sdo_skipped_;
-    status.level = DiagnosticStatus::WARN;
-    status.message = "runtime diagnostic SDO auto-paused: " +
+    runtime_sdo.level = DiagnosticStatus::WARN;
+    runtime_sdo.message = "runtime diagnostic SDO auto-paused: " +
       runtime_diagnostic_sdo_pause_reason_;
-    publish();
-    return;
+  } else if (!runtime_diagnostic_sdo_future_.valid()) {
+    runtime_diagnostic_sdo_future_ =
+      std::async(std::launch::async, [this]() { return read_runtime_diagnostic_sdo_(); });
+    runtime_diagnostic_sdo_start_time_ = std::chrono::steady_clock::now();
+    if (!result) {
+      runtime_sdo.level = DiagnosticStatus::STALE;
+      runtime_sdo.message = "runtime diagnostic SDO started";
+    }
   }
 
-  runtime_diagnostic_sdo_future_ =
-    std::async(std::launch::async, [this]() { return read_runtime_diagnostic_sdo_(); });
-  runtime_diagnostic_sdo_start_time_ = std::chrono::steady_clock::now();
-  if (!result) {
-    status.level = DiagnosticStatus::STALE;
-    status.message = "runtime diagnostic SDO started";
-  }
-  publish();
+  runtime_sdo.values.push_back(diagnostic_value("sdo_success", std::to_string(sdo_success_)));
+  runtime_sdo.values.push_back(diagnostic_value("sdo_skipped", std::to_string(sdo_skipped_)));
+  runtime_sdo.values.push_back(diagnostic_value("sdo_failed", std::to_string(sdo_failed_)));
+  runtime_sdo.values.push_back(diagnostic_value(
+      "runtime_sdo_last_elapsed_us", std::to_string(runtime_sdo_last_elapsed_us_)));
+  runtime_sdo.values.push_back(diagnostic_value(
+      "runtime_sdo_consecutive_lock_failures",
+      std::to_string(consecutive_runtime_sdo_lock_failures_)));
+  runtime_sdo.values.push_back(diagnostic_value(
+      "runtime_sdo_auto_paused", bool_text(runtime_diagnostic_sdo_auto_paused_)));
+  runtime_sdo.values.push_back(
+    diagnostic_value("runtime_sdo_pause_reason", runtime_diagnostic_sdo_pause_reason_));
+
+  array.status = {communication, sample_counter, runtime_sdo, sensor_status};
+  diagnostics_publisher_->publish(array);
 }
 
 RuntimeDiagnosticSdoResult Axia80M20EtherCATSensor::read_runtime_diagnostic_sdo_()
@@ -747,116 +585,18 @@ void Axia80M20EtherCATSensor::handle_status_code_(uint32_t status_code)
 void Axia80M20EtherCATSensor::check_sample_counter_(uint32_t sample_counter)
 {
   std::lock_guard<std::mutex> lock(sample_counter_mutex_);
-  if (!previous_sample_counter_) {
-    previous_sample_counter_ = sample_counter;
-    return;
-  }
-
-  const uint32_t delta = sample_counter - *previous_sample_counter_;
-  if (delta == 0) {
-    ++repeated_reads_window_;
-    ++consecutive_repeats_;
-    max_consecutive_repeats_window_ =
-      std::max(max_consecutive_repeats_window_, consecutive_repeats_);
-  } else {
-    consecutive_repeats_ = 0;
-    max_delta_window_ = std::max(max_delta_window_, delta);
-    if (delta > 1) {
-      ++jump_events_window_;
-      skipped_samples_window_ += static_cast<uint64_t>(delta) - 1u;
-    }
-  }
-
-  previous_sample_counter_ = sample_counter;
+  observe_sample_counter(sample_counter_state_, sample_counter);
 }
 
 SampleCounterDiagnostics Axia80M20EtherCATSensor::sample_counter_diagnostics_()
 {
-  SampleCounterDiagnostics result;
-  result.expected_sensor_rate_hz = expected_sensor_rate_hz_;
-  result.expected_read_rate_hz = expected_read_rate_hz_;
-  result.expected_repeats_per_sec =
-    std::max(0.0, expected_read_rate_hz_ - expected_sensor_rate_hz_);
-  result.expected_skipped_samples_per_sec =
-    std::max(0.0, expected_sensor_rate_hz_ - expected_read_rate_hz_);
-  result.expected_jump_events_per_sec =
-    std::min(expected_read_rate_hz_, result.expected_skipped_samples_per_sec);
-
-  const double expected_delta = expected_sensor_rate_hz_ / expected_read_rate_hz_;
-  result.large_jump_threshold = static_cast<uint32_t>(
-    std::max(10.0, std::ceil(expected_delta * 5.0)));
-
-  {
-    std::lock_guard<std::mutex> lock(sample_counter_mutex_);
-    const auto now = std::chrono::steady_clock::now();
-    result.elapsed_sec = std::max(
-      0.001,
-      std::chrono::duration<double>(now - sample_counter_window_start_).count());
-    result.repeated_reads = repeated_reads_window_;
-    result.skipped_samples = skipped_samples_window_;
-    result.jump_events = jump_events_window_;
-    result.max_delta = max_delta_window_;
-    result.consecutive_repeats = consecutive_repeats_;
-    result.max_consecutive_repeats =
-      std::max(consecutive_repeats_, max_consecutive_repeats_window_);
-
-    sample_counter_window_start_ = now;
-    repeated_reads_window_ = 0;
-    skipped_samples_window_ = 0;
-    jump_events_window_ = 0;
-    max_delta_window_ = 0;
-    max_consecutive_repeats_window_ = consecutive_repeats_;
-  }
-
-  result.actual_repeats_per_sec =
-    static_cast<double>(result.repeated_reads) / result.elapsed_sec;
-  result.actual_skipped_samples_per_sec =
-    static_cast<double>(result.skipped_samples) / result.elapsed_sec;
-  result.actual_jump_events_per_sec =
-    static_cast<double>(result.jump_events) / result.elapsed_sec;
-
-  const double repeat_warn =
-    result.expected_repeats_per_sec * 2.0 + 60.0;
-  const double repeat_error =
-    result.expected_repeats_per_sec * 2.0 + 100.0;
-  const double skipped_warn =
-    result.expected_skipped_samples_per_sec * 2.0 + 30.0;
-  const double skipped_error =
-    result.expected_skipped_samples_per_sec * 2.0 + 50.0;
-  const bool large_jump = result.max_delta > result.large_jump_threshold;
-  const bool extreme_jump =
-    result.max_delta > static_cast<uint64_t>(result.large_jump_threshold) * 5u;
-
-  const bool error =
-    result.max_consecutive_repeats >= 50 ||
-    result.actual_repeats_per_sec > repeat_error ||
-    result.actual_skipped_samples_per_sec > skipped_error ||
-    extreme_jump;
-  const bool warn =
-    result.max_consecutive_repeats >= 10 ||
-    result.actual_repeats_per_sec > repeat_warn ||
-    result.actual_skipped_samples_per_sec > skipped_warn ||
-    large_jump;
-
-  std::ostringstream message;
-  if (error) {
-    result.level = DiagnosticStatus::ERROR;
-    message << "sample counter ERROR";
-  } else if (warn) {
-    result.level = DiagnosticStatus::WARN;
-    message << "sample counter WARN";
-  } else {
-    result.level = DiagnosticStatus::OK;
-    message << "sample counter OK";
-  }
-  message << ": repeats=" << std::fixed << std::setprecision(1)
-          << result.actual_repeats_per_sec << "/s"
-          << ", skipped=" << result.actual_skipped_samples_per_sec << "/s"
-          << ", jump_events=" << result.actual_jump_events_per_sec << "/s"
-          << ", max_delta=" << result.max_delta
-          << ", consecutive_repeats=" << result.consecutive_repeats;
-  result.message = message.str();
-  return result;
+  std::lock_guard<std::mutex> lock(sample_counter_mutex_);
+  const auto now = std::chrono::steady_clock::now();
+  const double elapsed_sec =
+    std::chrono::duration<double>(now - sample_counter_window_start_).count();
+  sample_counter_window_start_ = now;
+  return take_sample_counter_diagnostics(
+    sample_counter_state_, elapsed_sec, expected_sensor_rate_hz_, expected_read_rate_hz_);
 }
 
 bool Axia80M20EtherCATSensor::driver_ready_() const

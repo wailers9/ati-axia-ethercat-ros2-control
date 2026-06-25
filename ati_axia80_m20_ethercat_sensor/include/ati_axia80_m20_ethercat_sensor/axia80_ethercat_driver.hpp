@@ -78,23 +78,37 @@ struct Axia80DriverParameters
   bool clear_bias_on_activate{true};
 };
 
-class Axia80EtherCATDriver
+class Axia80DriverInterface
+{
+public:
+  virtual ~Axia80DriverInterface() = default;
+  virtual void init() = 0;
+  virtual void shutdown() = 0;
+  virtual void set_bias() = 0;
+  virtual void clear_bias() = 0;
+  virtual bool is_active() const = 0;
+  virtual Axia80Sample read_once() = 0;
+  virtual Axia80DiagnosticReadings read_diagnostic_readings() const = 0;
+  virtual Axia80EtherCATState state_snapshot() const = 0;
+};
+
+class Axia80EtherCATDriver : public Axia80DriverInterface
 {
 public:
   explicit Axia80EtherCATDriver(const Axia80DriverParameters & parameters);
-  ~Axia80EtherCATDriver();
+  ~Axia80EtherCATDriver() override;
 
   Axia80EtherCATDriver(const Axia80EtherCATDriver &) = delete;
   Axia80EtherCATDriver & operator=(const Axia80EtherCATDriver &) = delete;
 
-  void init();
-  void shutdown();
-  void set_bias();
-  void clear_bias();
-  bool is_active() const;
-  Axia80Sample read_once();
-  Axia80DiagnosticReadings read_diagnostic_readings() const;
-  Axia80EtherCATState state_snapshot() const;
+  void init() override;
+  void shutdown() override;
+  void set_bias() override;
+  void clear_bias() override;
+  bool is_active() const override;
+  Axia80Sample read_once() override;
+  Axia80DiagnosticReadings read_diagnostic_readings() const override;
+  Axia80EtherCATState state_snapshot() const override;
 
 private:
   void request_master_();

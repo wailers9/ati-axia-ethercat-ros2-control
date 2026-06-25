@@ -20,6 +20,10 @@ master. It publishes `geometry_msgs/msg/WrenchStamped` data through
 - Decodes ATI `0x6010` status bits and throttles rapidly changing status logs.
 - Keeps `sample_counter` checks in `read()` and publishes one-second
   repeat/jump statistics through `/diagnostics` without per-sample warnings.
+- Uses a synchronized lightweight snapshot between real-time reads and the
+  low-rate diagnostics publisher.
+- Publishes independent communication, sample-counter, runtime-SDO, and
+  sensor-status diagnostic rows.
 - Optionally reads force/torque scale factors from SDO `0x2021:0x37` /
   `0x2021:0x38`, plus serial number, calibration part number, calibration time,
   and active calibration slot.
@@ -61,6 +65,16 @@ sudo apt-get install -y \
 EtherCAT master and development library installation depends on your system.
 Confirm that CMake can find `ecrt.h` and `libethercat.so` before building this
 package.
+
+## Automated Tests
+
+Hardware-independent GoogleTests cover parameter parsing, sample-counter
+statistics, independent diagnostic levels, mock-driver bias behavior, and pure
+helpers:
+
+```bash
+colcon test --packages-select ati_axia80_m20_ethercat_sensor
+```
 
 ## Clone and Build
 
