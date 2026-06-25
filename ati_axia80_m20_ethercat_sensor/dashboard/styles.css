@@ -179,6 +179,18 @@ article {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.counter-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chart-reference {
+  color: #555;
+  font-size: 12px;
+  margin: -4px 0 8px;
+}
+
 .channel {
   border: 1px solid #111;
   min-width: 0;
@@ -260,6 +272,10 @@ th {
   }
 
   .channel-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .counter-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

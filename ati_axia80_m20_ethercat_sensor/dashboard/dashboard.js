@@ -1,6 +1,7 @@
 const state = {
   data: null,
   history: [],
+  sampleCounterHistory: [],
   wrench: { values: {} },
   channelCardsReady: false,
   chartRefreshHz: 20,
@@ -32,6 +33,7 @@ function statusLabel(ok) {
 function applyFull(data) {
   state.data = data;
   state.history = data.history || state.history;
+  state.sampleCounterHistory = data.sample_counter_history || state.sampleCounterHistory;
   state.wrench = data.wrench || state.wrench;
   state.chartRefreshHz = Number(data.config?.chart_refresh_rate_hz || 20);
   const alerts = data.alerts || [];
@@ -49,6 +51,7 @@ function applyFull(data) {
   ensureChannelCards();
   updateChannelValues();
   updateEthercat(data.ethercat || {});
+  updateSampleCounterValues();
 
   document.getElementById("checks").innerHTML = Object.entries(data.checks || {}).map(([name, check]) => `
     <tr>
@@ -134,6 +137,80 @@ function updateEthercat(ethercat) {
 
 function drawCharts(history) {
   channels.forEach((channel) => drawSingleChart(channel, history));
+  drawCounterChart(
+    "chart-counter-repeats",
+    state.sampleCounterHistory,
+    "actual_repeats_per_sec",
+    "repeats/s"
+  );
+  drawCounterChart(
+    "chart-counter-jumps",
+    state.sampleCounterHistory,
+    "actual_jump_events_per_sec",
+    "jumps/s"
+  );
+}
+
+function updateSampleCounterValues() {
+  const history = state.sampleCounterHistory || [];
+  const latest = history.length ? history[history.length - 1] : {};
+  text("counter-repeat-value", `${fixed(latest.actual_repeats_per_sec)} /s`);
+  text("counter-jump-value", `${fixed(latest.actual_jump_events_per_sec)} /s`);
+  text(
+    "counter-repeat-reference",
+    `Expected repeats: ${fixed(latest.expected_repeats_per_sec)} /s`
+  );
+  text(
+    "counter-jump-reference",
+    `Expected jumps: ${fixed(latest.expected_jump_events_per_sec)} /s; expected/actual skipped: ${fixed(latest.expected_skipped_samples_per_sec)} / ${fixed(latest.actual_skipped_samples_per_sec)} /s`
+  );
+}
+
+function drawCounterChart(canvasId, history, key, label) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  const width = rect.width;
+  const height = rect.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "#ddd";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(36, 16);
+  ctx.lineTo(36, height - 24);
+  ctx.lineTo(width - 10, height - 24);
+  ctx.stroke();
+
+  const values = history.map((sample) => Number(sample[key])).filter(Number.isFinite);
+  if (!values.length) return;
+  const max = Math.max(1, ...values);
+  ctx.strokeStyle = "#111";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let started = false;
+  history.forEach((sample, index) => {
+    const value = Number(sample[key]);
+    if (!Number.isFinite(value)) return;
+    const x = 36 + (index / Math.max(1, history.length - 1)) * (width - 48);
+    const y = 16 + ((max - value) / max) * (height - 44);
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  });
+  ctx.stroke();
+  ctx.fillStyle = "#111";
+  ctx.font = "12px sans-serif";
+  ctx.fillText(max.toFixed(1), 4, 20);
+  ctx.fillText("0", 18, height - 26);
+  ctx.fillText(label, 44, height - 7);
 }
 
 function drawSingleChart(channel, history) {

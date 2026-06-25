@@ -38,6 +38,28 @@ struct RuntimeDiagnosticSdoResult
   uint64_t elapsed_us{0};
 };
 
+struct SampleCounterDiagnostics
+{
+  uint8_t level{0};
+  std::string message{"sample counter OK"};
+  double elapsed_sec{1.0};
+  double expected_sensor_rate_hz{487.0};
+  double expected_read_rate_hz{487.0};
+  double expected_repeats_per_sec{0.0};
+  double actual_repeats_per_sec{0.0};
+  double expected_skipped_samples_per_sec{0.0};
+  double expected_jump_events_per_sec{0.0};
+  double actual_skipped_samples_per_sec{0.0};
+  double actual_jump_events_per_sec{0.0};
+  uint64_t repeated_reads{0};
+  uint64_t skipped_samples{0};
+  uint64_t jump_events{0};
+  uint32_t max_delta{0};
+  uint32_t large_jump_threshold{10};
+  uint32_t consecutive_repeats{0};
+  uint32_t max_consecutive_repeats{0};
+};
+
 class Axia80M20EtherCATSensor : public hardware_interface::SensorInterface
 {
 public:
@@ -64,6 +86,7 @@ private:
   RuntimeDiagnosticSdoResult read_runtime_diagnostic_sdo_();
   void handle_status_code_(uint32_t status_code);
   void check_sample_counter_(uint32_t sample_counter);
+  SampleCounterDiagnostics sample_counter_diagnostics_();
   bool driver_ready_() const;
 
   Axia80DriverParameters parameters_;
@@ -84,6 +107,16 @@ private:
   uint64_t sdo_success_{0};
   uint64_t sdo_skipped_{0};
   uint64_t sdo_failed_{0};
+  double expected_sensor_rate_hz_{487.0};
+  double expected_read_rate_hz_{487.0};
+  mutable std::mutex sample_counter_mutex_;
+  std::chrono::steady_clock::time_point sample_counter_window_start_{};
+  uint64_t repeated_reads_window_{0};
+  uint64_t skipped_samples_window_{0};
+  uint64_t jump_events_window_{0};
+  uint32_t max_delta_window_{0};
+  uint32_t consecutive_repeats_{0};
+  uint32_t max_consecutive_repeats_window_{0};
 
   geometry_msgs::msg::WrenchStamped measurement_;
   Axia80EtherCATState ethercat_state_;

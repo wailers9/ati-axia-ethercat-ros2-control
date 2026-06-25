@@ -3,6 +3,9 @@
   <xacro:arg name="master_index" default="0"/>
   <xacro:arg name="slave_position" default="0"/>
   <xacro:arg name="slave_alias" default="0"/>
+  <xacro:arg name="sample_rate_code" default="0"/>
+  <xacro:arg name="expected_sensor_rate_hz" default="487"/>
+  <xacro:arg name="expected_read_rate_hz" default="487"/>
   <xacro:arg name="parent" default="tool0"/>
 
   <link name="$(arg parent)"/>
@@ -14,5 +17,8 @@
     parent="$(arg parent)"
     master_index="$(arg master_index)"
     slave_position="$(arg slave_position)"
-    slave_alias="$(arg slave_alias)"/>
+    slave_alias="$(arg slave_alias)"
+    sample_rate_code="$(arg sample_rate_code)"
+    expected_sensor_rate_hz="$(arg expected_sensor_rate_hz)"
+    expected_read_rate_hz="$(arg expected_read_rate_hz)"/>
 </robot>

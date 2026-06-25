@@ -18,5 +18,8 @@ ati_axia80_m20:
   filter_selection: 0
   calibration_slot: 0
   sample_rate_code: 0
+  # Diagnostic expectations. Keep expected_read_rate_hz aligned with controller_manager.update_rate.
+  expected_sensor_rate_hz: 487
+  expected_read_rate_hz: 487
   clear_bias_on_activate: true
   set_bias_on_activate: false

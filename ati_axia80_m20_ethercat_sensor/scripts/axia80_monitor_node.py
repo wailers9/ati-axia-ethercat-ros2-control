@@ -41,7 +41,7 @@ class Axia80MonitorNode(Node):
         self.declare_parameter("host", "0.0.0.0")
         self.declare_parameter("port", 8765)
         self.declare_parameter("check_period_sec", 10.0)
-        self.declare_parameter("telemetry_period_sec", 2.0)
+        self.declare_parameter("telemetry_period_sec", 1.0)
         self.declare_parameter("wrench_push_rate_hz", 25.0)
         self.declare_parameter("chart_refresh_rate_hz", 20.0)
         self.declare_parameter("wrench_topic", "/ati_axia80_m20_broadcaster/wrench")
@@ -71,6 +71,7 @@ class Axia80MonitorNode(Node):
         self._loop = None
         self._websockets = set()
         self._history = deque(maxlen=history_size)
+        self._sample_counter_history = deque(maxlen=history_size)
         self._diagnostics = []
         self._diagnostic_values = {}
         self._metrics = {"temperature": None, "voltage": None}
@@ -133,6 +134,7 @@ class Axia80MonitorNode(Node):
                 "alerts": list(self._alerts),
                 "wrench": self._wrench_snapshot_locked(),
                 "history": list(self._history),
+                "sample_counter_history": list(self._sample_counter_history),
                 "diagnostics": deepcopy(self._diagnostics),
                 "diagnostic_values": deepcopy(self._diagnostic_values),
                 "metrics": deepcopy(self._metrics),
@@ -242,6 +244,7 @@ class Axia80MonitorNode(Node):
             )
 
         ethercat = self._derive_ethercat_health(rows, flat_values)
+        counter_sample = self._sample_counter_sample(flat_values)
         with self._lock:
             self._diagnostics = rows
             self._diagnostic_values = flat_values
@@ -250,6 +253,31 @@ class Axia80MonitorNode(Node):
                 self._metrics["temperature"] = metrics["temperature"]
             if metrics["voltage"] is not None:
                 self._metrics["voltage"] = metrics["voltage"]
+            if counter_sample is not None:
+                self._sample_counter_history.append(counter_sample)
+        self._schedule_full_broadcast()
+
+    def _sample_counter_sample(self, values):
+        repeats = self._parse_number(values.get("actual_repeats_per_sec"))
+        jumps = self._parse_number(values.get("actual_jump_events_per_sec"))
+        skipped = self._parse_number(values.get("actual_skipped_samples_per_sec"))
+        if repeats is None and jumps is None and skipped is None:
+            return None
+        return {
+            "time": time.time(),
+            "actual_repeats_per_sec": repeats,
+            "actual_jump_events_per_sec": jumps,
+            "actual_skipped_samples_per_sec": skipped,
+            "expected_repeats_per_sec": self._parse_number(
+                values.get("expected_repeats_per_sec")
+            ),
+            "expected_skipped_samples_per_sec": self._parse_number(
+                values.get("expected_skipped_samples_per_sec")
+            ),
+            "expected_jump_events_per_sec": self._parse_number(
+                values.get("expected_jump_events_per_sec")
+            ),
+        }
 
     def _run_low_frequency_checks(self):
         topics = dict(self.get_topic_names_and_types())
@@ -492,6 +520,16 @@ class Axia80MonitorNode(Node):
                     "runtime_sdo_last_elapsed_us",
                     "runtime_sdo_auto_paused",
                     "runtime_sdo_pause_reason",
+                    "actual_repeats_per_sec",
+                    "actual_jump_events_per_sec",
+                    "actual_skipped_samples_per_sec",
+                    "expected_repeats_per_sec",
+                    "expected_skipped_samples_per_sec",
+                    "expected_jump_events_per_sec",
+                    "max_delta",
+                    "large_jump_threshold",
+                    "consecutive_repeats",
+                    "sample_counter_status",
                 )
             },
         }

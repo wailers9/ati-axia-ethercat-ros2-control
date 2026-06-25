@@ -14,6 +14,9 @@ EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
   - `Tx/Ty/Tz`
   - `status_code`
   - `sample_counter`
+- `read()` 中保留 `sample_counter` 检查，但不再逐次打印重复/跳变告警；统计结果每秒
+  发布到 `/diagnostics`。
+- `status_code` 快速抖动以及 `read()` 失败日志均带 throttle，避免高频刷屏。
 - 可选从 SDO `0x2021:0x37` / `0x2021:0x38` 读取 force/torque 缩放比例。
 - 防止 `counts_per_force` 和 `counts_per_torque` 为 0 或无效值导致除零。
 - 提供手动 bias 服务：
@@ -274,6 +277,8 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `487` | sample counter 诊断使用的传感器频率；未配置时按 `sample_rate_code` 精确频率推导 |
+| `expected_read_rate_hz` | `487` | 诊断使用的 ROS `read()` 频率，应与 `controller_manager.update_rate` 保持一致 |
 | `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
 | `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 
@@ -338,11 +343,41 @@ runtime_sdo_pause_reason
 supply_voltage_v
 gage_temperature_c
 diagnostic_status_message
+expected_sensor_rate_hz
+expected_read_rate_hz
+expected_repeats_per_sec
+actual_repeats_per_sec
+repeat_rate
+expected_skipped_samples_per_sec
+expected_jump_events_per_sec
+actual_skipped_samples_per_sec
+actual_jump_events_per_sec
+repeated_reads
+skipped_samples
+jump_events
+max_delta
+large_jump_threshold
+consecutive_repeats
+max_consecutive_repeats
+sample_counter_status
 ```
 
 高频 `read()` 周期每次都会执行 PDO receive/process 和 PDO queue/send。每个有效
 PDO sample 都会更新 `status_code`、解析 status bits，并检查 `sample_counter`
-是否重复或跳变。
+是否重复或跳变。检查函数只累计统计量，不在实时循环中直接报警。
+
+默认 `controller_manager.update_rate=487 Hz`，与手册中
+`sample_rate_code=0` 的精确采样率一致。可在启动时同时修改：
+
+```bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
+  sample_rate_code:=1 expected_sensor_rate_hz:=975 read_rate_hz:=975
+```
+
+sample counter 诊断每 1 秒评估一次：连续重复 10 次为 `WARN`，连续 50 次为
+`ERROR`。重复率和跳样率使用 `2 * 理论值 + 固定余量`：重复每秒余量
+`60/100`，跳样每秒余量 `30/50`，分别对应 WARN/ERROR。单次 delta 超过
+`max(10, ceil(5 * sensor_rate / read_rate))` 为 WARN，超过该阈值 5 倍为 ERROR。
 
 EtherCAT master、domain、slave state 检查被限制为每 1 秒最多执行一次，并且只在
 状态变化时打印日志。激活后的第一次 `read_once()` 一定会执行一次 EtherCAT state

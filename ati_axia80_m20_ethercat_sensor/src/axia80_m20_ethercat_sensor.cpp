@@ -1,6 +1,7 @@
 #include "ati_axia80_m20_ethercat_sensor/axia80_m20_ethercat_sensor.hpp"
 
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -60,6 +61,12 @@ std::string optional_param(
 bool parse_bool(const std::string & value)
 {
   return value == "true" || value == "True" || value == "1" || value == "yes" || value == "Yes";
+}
+
+double sample_rate_hz(uint8_t sample_rate_code)
+{
+  constexpr double SAMPLE_RATES_HZ[] = {487.0, 975.0, 1990.0, 3900.0};
+  return SAMPLE_RATES_HZ[sample_rate_code];
 }
 
 std::string bool_text(bool value)
@@ -209,7 +216,9 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
   if (!driver_) {
-    RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "Driver is not configured");
+    RCLCPP_ERROR_THROTTLE(
+      rclcpp::get_logger(LOGGER_NAME), *get_node()->get_clock(), 5000,
+      "Driver is not configured");
     return hardware_interface::return_type::ERROR;
   }
 
@@ -231,7 +240,9 @@ hardware_interface::return_type Axia80M20EtherCATSensor::read(
     handle_status_code_(status_code_raw_);
     check_sample_counter_(sample_counter_raw_);
   } catch (const std::exception & e) {
-    RCLCPP_ERROR(rclcpp::get_logger(LOGGER_NAME), "EtherCAT read failed: %s", e.what());
+    RCLCPP_ERROR_THROTTLE(
+      rclcpp::get_logger(LOGGER_NAME), *get_node()->get_clock(), 5000,
+      "EtherCAT read failed: %s", e.what());
     return hardware_interface::return_type::ERROR;
   }
 
@@ -285,6 +296,18 @@ void Axia80M20EtherCATSensor::parse_parameters_(
     parse_u8(optional_param(params, "calibration_slot", "0"), "calibration_slot", 1);
   parameters_.sample_rate_code =
     parse_u8(optional_param(params, "sample_rate_code", "0"), "sample_rate_code", 3);
+  expected_sensor_rate_hz_ = std::stod(
+    optional_param(
+      params, "expected_sensor_rate_hz",
+      std::to_string(sample_rate_hz(parameters_.sample_rate_code))));
+  expected_read_rate_hz_ = std::stod(
+    optional_param(params, "expected_read_rate_hz", std::to_string(expected_sensor_rate_hz_)));
+  if (!std::isfinite(expected_sensor_rate_hz_) || expected_sensor_rate_hz_ <= 0.0) {
+    throw std::runtime_error("expected_sensor_rate_hz must be a finite positive value");
+  }
+  if (!std::isfinite(expected_read_rate_hz_) || expected_read_rate_hz_ <= 0.0) {
+    throw std::runtime_error("expected_read_rate_hz must be a finite positive value");
+  }
   parameters_.set_bias_on_activate =
     parse_bool(optional_param(params, "set_bias_on_activate", "false"));
   parameters_.clear_bias_on_activate =
@@ -305,7 +328,17 @@ void Axia80M20EtherCATSensor::reset_state_()
   status_code_raw_ = 0;
   sample_counter_raw_ = 0;
   previous_status_code_.reset();
-  previous_sample_counter_.reset();
+  {
+    std::lock_guard<std::mutex> lock(sample_counter_mutex_);
+    previous_sample_counter_.reset();
+    sample_counter_window_start_ = std::chrono::steady_clock::now();
+    repeated_reads_window_ = 0;
+    skipped_samples_window_ = 0;
+    jump_events_window_ = 0;
+    max_delta_window_ = 0;
+    consecutive_repeats_ = 0;
+    max_consecutive_repeats_window_ = 0;
+  }
   status_code_ = nan;
   sample_counter_ = nan;
 }
@@ -432,7 +465,70 @@ void Axia80M20EtherCATSensor::publish_diagnostics_()
   status.values.push_back(
     diagnostic_value("ethercat_slave_al_state", std::to_string(ethercat_state_.slave_al_state)));
 
+  const auto sample_diagnostics = sample_counter_diagnostics_();
   const auto publish = [&]() {
+    status.values.push_back(
+      diagnostic_value(
+        "expected_sensor_rate_hz", std::to_string(sample_diagnostics.expected_sensor_rate_hz)));
+    status.values.push_back(
+      diagnostic_value(
+        "expected_read_rate_hz", std::to_string(sample_diagnostics.expected_read_rate_hz)));
+    status.values.push_back(
+      diagnostic_value(
+        "sample_counter_window_sec", std::to_string(sample_diagnostics.elapsed_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "expected_repeats_per_sec",
+        std::to_string(sample_diagnostics.expected_repeats_per_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "actual_repeats_per_sec", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
+    status.values.push_back(
+      diagnostic_value("repeat_rate", std::to_string(sample_diagnostics.actual_repeats_per_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "expected_skipped_samples_per_sec",
+        std::to_string(sample_diagnostics.expected_skipped_samples_per_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "expected_jump_events_per_sec",
+        std::to_string(sample_diagnostics.expected_jump_events_per_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "actual_skipped_samples_per_sec",
+        std::to_string(sample_diagnostics.actual_skipped_samples_per_sec)));
+    status.values.push_back(
+      diagnostic_value(
+        "actual_jump_events_per_sec",
+        std::to_string(sample_diagnostics.actual_jump_events_per_sec)));
+    status.values.push_back(
+      diagnostic_value("repeated_reads", std::to_string(sample_diagnostics.repeated_reads)));
+    status.values.push_back(
+      diagnostic_value("skipped_samples", std::to_string(sample_diagnostics.skipped_samples)));
+    status.values.push_back(
+      diagnostic_value("jump_events", std::to_string(sample_diagnostics.jump_events)));
+    status.values.push_back(
+      diagnostic_value("max_delta", std::to_string(sample_diagnostics.max_delta)));
+    status.values.push_back(
+      diagnostic_value(
+        "large_jump_threshold", std::to_string(sample_diagnostics.large_jump_threshold)));
+    status.values.push_back(
+      diagnostic_value(
+        "consecutive_repeats", std::to_string(sample_diagnostics.consecutive_repeats)));
+    status.values.push_back(
+      diagnostic_value(
+        "max_consecutive_repeats",
+        std::to_string(sample_diagnostics.max_consecutive_repeats)));
+    status.values.push_back(
+      diagnostic_value("sample_counter_status", sample_diagnostics.message));
+    if (status.level != DiagnosticStatus::STALE &&
+      sample_diagnostics.level > status.level)
+    {
+      status.level = sample_diagnostics.level;
+    }
+    if (sample_diagnostics.level != DiagnosticStatus::OK) {
+      status.message += "; " + sample_diagnostics.message;
+    }
     status.values.push_back(diagnostic_value("sdo_success", std::to_string(sdo_success_)));
     status.values.push_back(diagnostic_value("sdo_skipped", std::to_string(sdo_skipped_)));
     status.values.push_back(diagnostic_value("sdo_failed", std::to_string(sdo_failed_)));
@@ -633,14 +729,14 @@ void Axia80M20EtherCATSensor::handle_status_code_(uint32_t status_code)
 
   const auto description = describe_status_bits(status_code);
   if (status_code == 0) {
-    RCLCPP_INFO(
-      rclcpp::get_logger(LOGGER_NAME),
+    RCLCPP_INFO_THROTTLE(
+      rclcpp::get_logger(LOGGER_NAME), *get_node()->get_clock(), 1000,
       "Axia status_code changed to %s: %s",
       hex_u32(status_code).c_str(),
       description.c_str());
   } else {
-    RCLCPP_WARN(
-      rclcpp::get_logger(LOGGER_NAME),
+    RCLCPP_WARN_THROTTLE(
+      rclcpp::get_logger(LOGGER_NAME), *get_node()->get_clock(), 1000,
       "Axia status_code changed to %s: %s",
       hex_u32(status_code).c_str(),
       description.c_str());
@@ -650,31 +746,117 @@ void Axia80M20EtherCATSensor::handle_status_code_(uint32_t status_code)
 
 void Axia80M20EtherCATSensor::check_sample_counter_(uint32_t sample_counter)
 {
+  std::lock_guard<std::mutex> lock(sample_counter_mutex_);
   if (!previous_sample_counter_) {
     previous_sample_counter_ = sample_counter;
     return;
   }
 
-  const uint32_t expected = *previous_sample_counter_ + 1u;
-  if (sample_counter == *previous_sample_counter_) {
-    RCLCPP_WARN_THROTTLE(
-      rclcpp::get_logger(LOGGER_NAME),
-      *get_node()->get_clock(),
-      1000,
-      "Axia sample_counter repeated at %u",
-      sample_counter);
-  } else if (sample_counter != expected) {
-    RCLCPP_WARN_THROTTLE(
-      rclcpp::get_logger(LOGGER_NAME),
-      *get_node()->get_clock(),
-      1000,
-      "Axia sample_counter discontinuity: previous=%u expected=%u actual=%u",
-      *previous_sample_counter_,
-      expected,
-      sample_counter);
+  const uint32_t delta = sample_counter - *previous_sample_counter_;
+  if (delta == 0) {
+    ++repeated_reads_window_;
+    ++consecutive_repeats_;
+    max_consecutive_repeats_window_ =
+      std::max(max_consecutive_repeats_window_, consecutive_repeats_);
+  } else {
+    consecutive_repeats_ = 0;
+    max_delta_window_ = std::max(max_delta_window_, delta);
+    if (delta > 1) {
+      ++jump_events_window_;
+      skipped_samples_window_ += static_cast<uint64_t>(delta) - 1u;
+    }
   }
 
   previous_sample_counter_ = sample_counter;
+}
+
+SampleCounterDiagnostics Axia80M20EtherCATSensor::sample_counter_diagnostics_()
+{
+  SampleCounterDiagnostics result;
+  result.expected_sensor_rate_hz = expected_sensor_rate_hz_;
+  result.expected_read_rate_hz = expected_read_rate_hz_;
+  result.expected_repeats_per_sec =
+    std::max(0.0, expected_read_rate_hz_ - expected_sensor_rate_hz_);
+  result.expected_skipped_samples_per_sec =
+    std::max(0.0, expected_sensor_rate_hz_ - expected_read_rate_hz_);
+  result.expected_jump_events_per_sec =
+    std::min(expected_read_rate_hz_, result.expected_skipped_samples_per_sec);
+
+  const double expected_delta = expected_sensor_rate_hz_ / expected_read_rate_hz_;
+  result.large_jump_threshold = static_cast<uint32_t>(
+    std::max(10.0, std::ceil(expected_delta * 5.0)));
+
+  {
+    std::lock_guard<std::mutex> lock(sample_counter_mutex_);
+    const auto now = std::chrono::steady_clock::now();
+    result.elapsed_sec = std::max(
+      0.001,
+      std::chrono::duration<double>(now - sample_counter_window_start_).count());
+    result.repeated_reads = repeated_reads_window_;
+    result.skipped_samples = skipped_samples_window_;
+    result.jump_events = jump_events_window_;
+    result.max_delta = max_delta_window_;
+    result.consecutive_repeats = consecutive_repeats_;
+    result.max_consecutive_repeats =
+      std::max(consecutive_repeats_, max_consecutive_repeats_window_);
+
+    sample_counter_window_start_ = now;
+    repeated_reads_window_ = 0;
+    skipped_samples_window_ = 0;
+    jump_events_window_ = 0;
+    max_delta_window_ = 0;
+    max_consecutive_repeats_window_ = consecutive_repeats_;
+  }
+
+  result.actual_repeats_per_sec =
+    static_cast<double>(result.repeated_reads) / result.elapsed_sec;
+  result.actual_skipped_samples_per_sec =
+    static_cast<double>(result.skipped_samples) / result.elapsed_sec;
+  result.actual_jump_events_per_sec =
+    static_cast<double>(result.jump_events) / result.elapsed_sec;
+
+  const double repeat_warn =
+    result.expected_repeats_per_sec * 2.0 + 60.0;
+  const double repeat_error =
+    result.expected_repeats_per_sec * 2.0 + 100.0;
+  const double skipped_warn =
+    result.expected_skipped_samples_per_sec * 2.0 + 30.0;
+  const double skipped_error =
+    result.expected_skipped_samples_per_sec * 2.0 + 50.0;
+  const bool large_jump = result.max_delta > result.large_jump_threshold;
+  const bool extreme_jump =
+    result.max_delta > static_cast<uint64_t>(result.large_jump_threshold) * 5u;
+
+  const bool error =
+    result.max_consecutive_repeats >= 50 ||
+    result.actual_repeats_per_sec > repeat_error ||
+    result.actual_skipped_samples_per_sec > skipped_error ||
+    extreme_jump;
+  const bool warn =
+    result.max_consecutive_repeats >= 10 ||
+    result.actual_repeats_per_sec > repeat_warn ||
+    result.actual_skipped_samples_per_sec > skipped_warn ||
+    large_jump;
+
+  std::ostringstream message;
+  if (error) {
+    result.level = DiagnosticStatus::ERROR;
+    message << "sample counter ERROR";
+  } else if (warn) {
+    result.level = DiagnosticStatus::WARN;
+    message << "sample counter WARN";
+  } else {
+    result.level = DiagnosticStatus::OK;
+    message << "sample counter OK";
+  }
+  message << ": repeats=" << std::fixed << std::setprecision(1)
+          << result.actual_repeats_per_sec << "/s"
+          << ", skipped=" << result.actual_skipped_samples_per_sec << "/s"
+          << ", jump_events=" << result.actual_jump_events_per_sec << "/s"
+          << ", max_delta=" << result.max_delta
+          << ", consecutive_repeats=" << result.consecutive_repeats;
+  result.message = message.str();
+  return result;
 }
 
 bool Axia80M20EtherCATSensor::driver_ready_() const

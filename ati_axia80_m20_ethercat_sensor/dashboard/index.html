@@ -93,6 +93,31 @@
       <section class="section-block">
         <div class="section-title">
           <span>05</span>
+          <h2>Sample Counter Rates</h2>
+        </div>
+        <div class="counter-grid">
+          <article class="channel">
+            <header>
+              <div class="channel-name">Repeated reads / sec</div>
+              <div class="channel-value" id="counter-repeat-value">-</div>
+            </header>
+            <div class="chart-reference" id="counter-repeat-reference">Expected: -</div>
+            <canvas id="chart-counter-repeats" width="640" height="160"></canvas>
+          </article>
+          <article class="channel">
+            <header>
+              <div class="channel-name">Counter jump events / sec</div>
+              <div class="channel-value" id="counter-jump-value">-</div>
+            </header>
+            <div class="chart-reference" id="counter-jump-reference">Expected jumps: -</div>
+            <canvas id="chart-counter-jumps" width="640" height="160"></canvas>
+          </article>
+        </div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-title">
+          <span>06</span>
           <h2>ROS 2 Checks</h2>
         </div>
         <div class="table-wrap">
@@ -108,7 +133,7 @@
       <section class="section-block detail-grid">
         <article>
           <div class="section-title compact">
-            <span>06</span>
+            <span>07</span>
             <h2>Hardware Interfaces</h2>
           </div>
           <table>
@@ -121,7 +146,7 @@
 
         <article>
           <div class="section-title compact">
-            <span>07</span>
+            <span>08</span>
             <h2>Diagnostics</h2>
           </div>
           <table>

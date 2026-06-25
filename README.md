@@ -25,8 +25,11 @@ Web monitor fit together.
   - `Tx/Ty/Tz`
   - `status_code`
   - `sample_counter`
-- Decodes ATI `0x6010` status bits and logs only when the status word changes.
-- Checks `sample_counter` continuity for repeated or skipped PDO samples.
+- Decodes ATI `0x6010` status bits and throttles logs when the status word
+  changes rapidly.
+- Keeps `sample_counter` checking in `read()`, but publishes one-second
+  repeat/jump statistics and severity through `/diagnostics` instead of logging
+  each discontinuity from the real-time loop.
 - Optionally reads force/torque scale factors from SDO `0x2021:0x37` /
   `0x2021:0x38`, plus serial number, calibration part number, calibration time,
   and active calibration slot.
@@ -248,9 +251,9 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
 The monitor does not control EtherCAT and does not participate in the real-time
 control path. Service, topic, and interface checks stay low-rate at 10 second
 intervals by default, which is 0.1 Hz. Full dashboard telemetry such as
-diagnostics, voltage, temperature, and EtherCAT health is pushed at 0.5 Hz by
-default. Wrench data is pushed to the browser at 25 Hz by default, and the
-browser redraws the six charts at 20 Hz by default. On startup, the node prints
+diagnostics, voltage, temperature, EtherCAT health, and sample-counter rates is
+pushed at 1 Hz by default. Wrench data is pushed to the browser at 25 Hz by
+default, and the browser redraws the charts at 20 Hz by default. On startup, the node prints
 the dashboard address once:
 
 ```text
@@ -276,7 +279,7 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
   monitor_host:=0.0.0.0 \
   monitor_port:=8765 \
   monitor_check_period_sec:=10.0 \
-  monitor_telemetry_period_sec:=2.0 \
+  monitor_telemetry_period_sec:=1.0 \
   monitor_wrench_push_rate_hz:=25.0 \
   monitor_chart_refresh_rate_hz:=20.0
 ```
@@ -310,6 +313,8 @@ Dashboard sections:
 - `Force / Torque Channels`: six separate charts for Fx, Fy, Fz, Tx, Ty, and
   Tz, each with its latest value. WebSocket wrench updates are intended for
   20-50 Hz, and chart redraws are intended for 10-30 Hz.
+- `Sample Counter Rates`: one-second charts for actual repeated reads and
+  counter jump events, with expected repeat/skipped-sample references.
 - `ROS 2 Checks`: service type checks, topic type checks, wrench freshness,
   finite-value validation, expected hardware interface availability, and
   low-rate EtherCAT health summary.
@@ -418,6 +423,8 @@ These parameters are configured in
 | `filter_selection` | `0` | ATI low-pass filter selection in `0x7010:01` bits 4..7. `0` disables filtering; `1..8` select progressively lower cutoff frequencies from the manual table. |
 | `calibration_slot` | `0` | Calibration slot, 0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `487` | Sensor rate used by sample-counter diagnostics; defaults to the exact rate selected by `sample_rate_code` when omitted |
+| `expected_read_rate_hz` | `487` | Expected `read()` rate used by diagnostics; keep aligned with `controller_manager.update_rate` |
 | `clear_bias_on_activate` | `true` | Clear any existing bias on activation |
 | `set_bias_on_activate` | `false` | Set bias automatically on activation. Disabled by default. |
 
@@ -485,11 +492,44 @@ runtime_sdo_pause_reason
 supply_voltage_v
 gage_temperature_c
 diagnostic_status_message
+expected_sensor_rate_hz
+expected_read_rate_hz
+expected_repeats_per_sec
+actual_repeats_per_sec
+repeat_rate
+expected_skipped_samples_per_sec
+expected_jump_events_per_sec
+actual_skipped_samples_per_sec
+actual_jump_events_per_sec
+repeated_reads
+skipped_samples
+jump_events
+max_delta
+large_jump_threshold
+consecutive_repeats
+max_consecutive_repeats
+sample_counter_status
 ```
 
 The high-frequency `read()` cycle always performs PDO receive/process and PDO
 queue/send work. On each valid PDO sample it updates `status_code`, decodes the
-status bits, and checks `sample_counter` continuity.
+status bits, and checks `sample_counter` continuity. The check only accumulates
+counters; it does not emit per-sample warnings.
+
+The default controller read rate is `487 Hz`, matching the manual's exact
+default sensor rate (`sample_rate_code=0`). Launch-time overrides are available:
+
+```bash
+ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
+  sample_rate_code:=1 expected_sensor_rate_hz:=975 read_rate_hz:=975
+```
+
+Sample-counter diagnostics are evaluated once per second. Ten consecutive
+repeats produce `WARN`; 50 produce `ERROR`. Repeat and skipped-sample rates are
+compared with `2 * expected + margin` (`60/100` repeats per second and `30/50`
+skipped samples per second for WARN/ERROR). A delta larger than
+`max(10, ceil(5 * sensor_rate / read_rate))` produces `WARN`; more than five
+times that threshold produces `ERROR`.
 
 EtherCAT master, domain, and slave state checks are throttled to once per second
 and logged only when state changes. The first `read_once()` after activation

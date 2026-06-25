@@ -14,6 +14,8 @@ EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
   - `Tx/Ty/Tz`
   - `status_code`
   - `sample_counter`
+- `read()` 中保留 sample counter 检查，仅累计统计量，每秒通过 `/diagnostics`
+  发布，不再逐次打印告警。
 - 可选从 SDO `0x2021:0x37` / `0x2021:0x38` 读取 force/torque 缩放比例。
 - 防止 `counts_per_force` 和 `counts_per_torque` 为 0 或无效值导致除零。
 - 提供手动 bias 服务：
@@ -274,6 +276,8 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
 | `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `487` | sample counter 诊断使用的传感器频率 |
+| `expected_read_rate_hz` | `487` | 诊断使用的 ROS read 频率，应与 controller manager 一致 |
 | `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
 | `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 
@@ -316,7 +320,7 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py
 
 监测节点不直接控制 EtherCAT，也不参与实时控制路径。service、topic、hardware interface
 等查询默认每 10 秒检查一次，也就是 0.1 Hz。完整网页监测数据，例如 diagnostics、电压、
-温度和 EtherCAT health，默认以 0.5 Hz 推送到网页。六维力 wrench 数据默认以 25 Hz
+温度、EtherCAT health 和 sample counter 统计，默认以 1 Hz 推送到网页。六维力 wrench 数据默认以 25 Hz
 通过 WebSocket 推送到网页，网页六张图表默认以 20 Hz 重绘。启动后终端会打印一次网页监听地址，
 默认端口为 `8765`：
 
@@ -343,7 +347,7 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \
   monitor_host:=0.0.0.0 \
   monitor_port:=8765 \
   monitor_check_period_sec:=10.0 \
-  monitor_telemetry_period_sec:=2.0 \
+  monitor_telemetry_period_sec:=1.0 \
   monitor_wrench_push_rate_hz:=25.0 \
   monitor_chart_refresh_rate_hz:=20.0
 ```
@@ -417,10 +421,23 @@ runtime_sdo_pause_reason
 supply_voltage_v
 gage_temperature_c
 diagnostic_status_message
+expected_repeats_per_sec
+actual_repeats_per_sec
+repeat_rate
+expected_skipped_samples_per_sec
+expected_jump_events_per_sec
+actual_skipped_samples_per_sec
+actual_jump_events_per_sec
+skipped_samples
+max_delta
+consecutive_repeats
+sample_counter_status
 ```
 
 高频 `read()` 周期每次都会执行 PDO receive/process 和 PDO queue/send。每个有效
 PDO sample 都会更新 `status_code`、解析 status bits，并检查 `sample_counter`
+，但实时循环只累计数据。诊断每秒评估一次：连续重复 10/50 次分别为 WARN/ERROR；
+频率阈值使用理论值 2 倍再加固定余量（重复 60/100，跳样 30/50）。
 是否重复或跳变。
 
 EtherCAT master、domain、slave state 检查被限制为每 1 秒最多执行一次，并且只在

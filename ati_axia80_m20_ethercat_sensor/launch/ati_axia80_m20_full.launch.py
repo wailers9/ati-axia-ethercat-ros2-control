@@ -29,6 +29,21 @@ def generate_launch_description():
             description="EtherCAT slave alias. Use 0 when aliases are not configured.",
         ),
         DeclareLaunchArgument(
+            "sample_rate_code",
+            default_value="0",
+            description="Axia sample rate: 0=487, 1=975, 2=1990, 3=3900 Hz.",
+        ),
+        DeclareLaunchArgument(
+            "expected_sensor_rate_hz",
+            default_value="487",
+            description="Sensor rate used by sample-counter diagnostics.",
+        ),
+        DeclareLaunchArgument(
+            "read_rate_hz",
+            default_value="487",
+            description="controller_manager update rate and expected ROS read rate.",
+        ),
+        DeclareLaunchArgument(
             "monitor_host",
             default_value="0.0.0.0",
             description="HTTP/WebSocket bind address for the monitor dashboard.",
@@ -45,8 +60,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "monitor_telemetry_period_sec",
-            default_value="2.0",
-            description="Full dashboard telemetry refresh period. 2.0 sec is 0.5 Hz.",
+            default_value="1.0",
+            description="Full dashboard telemetry refresh period. Defaults to 1 Hz.",
         ),
         DeclareLaunchArgument(
             "monitor_wrench_push_rate_hz",
@@ -66,6 +81,9 @@ def generate_launch_description():
             "master_index": LaunchConfiguration("master_index"),
             "slave_position": LaunchConfiguration("slave_position"),
             "slave_alias": LaunchConfiguration("slave_alias"),
+            "sample_rate_code": LaunchConfiguration("sample_rate_code"),
+            "expected_sensor_rate_hz": LaunchConfiguration("expected_sensor_rate_hz"),
+            "read_rate_hz": LaunchConfiguration("read_rate_hz"),
         }.items(),
     )
 
