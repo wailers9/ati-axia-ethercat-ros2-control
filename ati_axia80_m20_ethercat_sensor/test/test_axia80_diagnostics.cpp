@@ -66,6 +66,8 @@ TEST(ParameterParsing, ParsesValidHardwareConfigurationWithoutHardware)
   EXPECT_EQ(parsed.driver.sample_rate_code, 2u);
   EXPECT_DOUBLE_EQ(parsed.expected_sensor_rate_hz, 1990.0);
   EXPECT_FALSE(parsed.runtime_diagnostic_sdo_enabled);
+  EXPECT_FALSE(parsed.driver.clear_bias_on_activate);
+  EXPECT_FALSE(parsed.driver.set_bias_on_activate);
 }
 
 TEST(SampleCounter, CountsRepeatsJumpsAndSkippedSamples)

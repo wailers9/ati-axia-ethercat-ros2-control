@@ -49,6 +49,10 @@ Web monitor fit together.
 - Provides manual bias services:
   - `/<sensor_name>/set_bias`
   - `/<sensor_name>/clear_bias`
+- Does not change bias during activation by default. Startup reads the current
+  sensor state; bias changes require an explicit service call.
+- Does not enforce force or torque limits. Consumers must validate freshness,
+  finite values, diagnostics, and application-specific safe ranges.
 - Provides a low-frequency Web monitor dashboard that checks ROS 2 services,
   topics, hardware interfaces, wrench freshness, finite force/torque values,
   and diagnostics without touching the EtherCAT real-time control path.
@@ -350,6 +354,12 @@ Dashboard sections:
 
 ## Force/Torque Topic
 
+> Safety note: the driver publishes scaled measurements but does not clamp,
+> reject, or stop on excessive force/torque. A finite numeric value is not proof
+> that a sample is safe or current. Validate wrench freshness, sensor status,
+> EtherCAT diagnostics, sample-counter continuity, and robot-specific limits in
+> the consuming controller.
+
 The demo launch starts:
 
 - `ros2_control_node`
@@ -448,11 +458,12 @@ These parameters are configured in
 | `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
 | `expected_sensor_rate_hz` | `975` | Sensor rate used by sample-counter diagnostics; defaults to the exact rate selected by `sample_rate_code` when omitted |
 | `expected_read_rate_hz` | `975` | Expected `read()` rate used by diagnostics; keep aligned with `controller_manager.update_rate` |
-| `clear_bias_on_activate` | `true` | Clear any existing bias on activation |
+| `clear_bias_on_activate` | `false` | Clear an existing bias on activation. Disabled by default; prefer an explicit service call. |
 | `set_bias_on_activate` | `false` | Set bias automatically on activation. Disabled by default. |
 
-`set_bias_on_activate` is disabled by default to avoid setting the zero point
-before the sensor has stabilized.
+Both automatic bias options are disabled by default. Activation preserves the
+current bias state; call a bias service only after confirming the sensor load
+and downstream controller state.
 
 If SDO reads fail in the field, set:
 

@@ -161,7 +161,7 @@ ParsedHardwareParameters parse_hardware_parameters(const HardwareParameters & pa
   result.driver.set_bias_on_activate = parse_bool_parameter(
     optional_param(params, "set_bias_on_activate", "false"), "set_bias_on_activate");
   result.driver.clear_bias_on_activate = parse_bool_parameter(
-    optional_param(params, "clear_bias_on_activate", "true"), "clear_bias_on_activate");
+    optional_param(params, "clear_bias_on_activate", "false"), "clear_bias_on_activate");
   return result;
 }
 

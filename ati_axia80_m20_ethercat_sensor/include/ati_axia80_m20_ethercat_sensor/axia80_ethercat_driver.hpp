@@ -75,7 +75,7 @@ struct Axia80DriverParameters
   uint8_t sample_rate_code{1};    // 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz.
 
   bool set_bias_on_activate{false};
-  bool clear_bias_on_activate{true};
+  bool clear_bias_on_activate{false};
 };
 
 class Axia80DriverInterface

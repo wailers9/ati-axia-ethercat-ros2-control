@@ -237,7 +237,7 @@ class Axia80MonitorNode(Node):
                 {
                     "name": status.name,
                     "hardware_id": status.hardware_id,
-                    "level": int(status.level),
+                    "level": self._diagnostic_level(status.level),
                     "message": status.message,
                     "values": values,
                 }
@@ -523,6 +523,12 @@ class Axia80MonitorNode(Node):
         if value is None or value == "":
             return f"{name} not reported"
         return f"{name}={value}"
+
+    @staticmethod
+    def _diagnostic_level(value):
+        if isinstance(value, (bytes, bytearray)):
+            return value[0] if value else 0
+        return int(value)
 
     @staticmethod
     def _parse_bool(value):

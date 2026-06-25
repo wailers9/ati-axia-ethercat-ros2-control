@@ -30,6 +30,10 @@ EtherCAT master 读取 ATI Axia80-M20 六维力/力矩传感器，并通过
 - 提供手动 bias 服务：
   - `/ati_axia80_m20/set_bias`
   - `/ati_axia80_m20/clear_bias`
+- 默认激活时不修改 bias，只读取传感器当前状态。设置或清除 bias 必须由用户明确调用
+  service 完成。
+- 驱动本身不设置力/力矩上限。控制器使用 wrench 数据前必须检查数据时效性、有限值、
+  status/diagnostics 和机器人自身的安全阈值。
 
 ## 依赖
 
@@ -208,6 +212,10 @@ ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_demo.launch.py \
 
 ## 获取力/力矩 Topic
 
+> 安全提示：驱动只发布换算后的力/力矩数据，不会对过大的力/力矩做限幅、拒绝或触发停机。
+> 有限数值不代表数据一定安全或仍然有效。上层控制器必须检查 wrench 新鲜度、传感器状态、
+> EtherCAT diagnostics、sample counter 连续性以及机器人对应的安全阈值。
+
 demo launch 会启动：
 
 - `ros2_control_node`
@@ -302,10 +310,11 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 | `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
 | `expected_sensor_rate_hz` | `975` | sample counter 诊断使用的传感器频率；未配置时按 `sample_rate_code` 精确频率推导 |
 | `expected_read_rate_hz` | `975` | 诊断使用的 ROS `read()` 频率，应与 `controller_manager.update_rate` 保持一致 |
-| `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
+| `clear_bias_on_activate` | `false` | 激活时清除已有 bias，默认关闭，建议显式调用 service |
 | `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 
-默认不启用 `set_bias_on_activate`，避免传感器刚启动未稳定时自动设置零点。
+两个自动 bias 参数默认都关闭。激活过程保留传感器当前 bias 状态；应在确认受力状态和
+下游控制器状态后，再由用户显式调用 bias service。
 
 如果现场 SDO 读取失败，可设置：
 

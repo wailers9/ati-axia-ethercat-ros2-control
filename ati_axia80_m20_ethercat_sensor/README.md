@@ -35,6 +35,10 @@ master. It publishes `geometry_msgs/msg/WrenchStamped` data through
 - Provides manual bias services:
   - `/<sensor_name>/set_bias`
   - `/<sensor_name>/clear_bias`
+- Preserves the current bias state during activation by default. Bias changes
+  require an explicit service call.
+- Does not enforce force/torque limits; consumers must validate freshness,
+  diagnostics, finite values, and application-specific safe ranges.
 
 ## Dependencies
 
@@ -213,6 +217,10 @@ Relationship to `/etc/ethercat.conf`:
 
 ## Force/Torque Topic
 
+> The driver does not clamp force or torque or provide a safety stop. Consumers
+> must validate data freshness, status/diagnostics, sample-counter continuity,
+> finite values, and robot-specific limits.
+
 The demo launch starts:
 
 - `ros2_control_node`
@@ -311,11 +319,11 @@ These parameters are configured in
 | `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
 | `expected_sensor_rate_hz` | `975` | Expected sensor rate for sample-counter diagnostics |
 | `expected_read_rate_hz` | `975` | Expected ROS read rate; align with `controller_manager.update_rate` |
-| `clear_bias_on_activate` | `true` | Clear any existing bias on activation |
+| `clear_bias_on_activate` | `false` | Clear an existing bias on activation. Disabled by default. |
 | `set_bias_on_activate` | `false` | Set bias automatically on activation. Disabled by default. |
 
-`set_bias_on_activate` is disabled by default to avoid setting the zero point
-before the sensor has stabilized.
+Both automatic bias options are disabled by default. Use the bias services only
+after confirming the sensor load and downstream controller state.
 
 If SDO reads fail in the field, set:
 

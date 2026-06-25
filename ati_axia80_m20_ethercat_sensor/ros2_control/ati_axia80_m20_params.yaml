@@ -21,5 +21,5 @@ ati_axia80_m20:
   # Diagnostic expectations. Keep expected_read_rate_hz aligned with controller_manager.update_rate.
   expected_sensor_rate_hz: 975
   expected_read_rate_hz: 975
-  clear_bias_on_activate: true
+  clear_bias_on_activate: false
   set_bias_on_activate: false

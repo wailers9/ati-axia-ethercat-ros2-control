@@ -35,7 +35,7 @@
         <param name="sample_rate_code">${sample_rate_code}</param>
         <param name="expected_sensor_rate_hz">${expected_sensor_rate_hz}</param>
         <param name="expected_read_rate_hz">${expected_read_rate_hz}</param>
-        <param name="clear_bias_on_activate">true</param>
+        <param name="clear_bias_on_activate">false</param>
         <param name="set_bias_on_activate">false</param>
 
         <state_interface name="timestamp.sec"/>
