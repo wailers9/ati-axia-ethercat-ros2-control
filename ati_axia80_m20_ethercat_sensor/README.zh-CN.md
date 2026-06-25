@@ -275,9 +275,9 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 | `counts_per_torque` | `1000000` | 手动 torque 缩放比例 |
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
-| `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
-| `expected_sensor_rate_hz` | `487` | sample counter 诊断使用的传感器频率 |
-| `expected_read_rate_hz` | `487` | 诊断使用的 ROS read 频率，应与 controller manager 一致 |
+| `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `975` | sample counter 诊断使用的传感器频率 |
+| `expected_read_rate_hz` | `975` | 诊断使用的 ROS read 频率，应与 controller manager 一致 |
 | `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
 | `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 

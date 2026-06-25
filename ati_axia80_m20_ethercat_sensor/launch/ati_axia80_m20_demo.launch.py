@@ -24,17 +24,17 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             "sample_rate_code",
-            default_value="0",
+            default_value="1",
             description="Axia sample rate: 0=487, 1=975, 2=1990, 3=3900 Hz.",
         ),
         DeclareLaunchArgument(
             "expected_sensor_rate_hz",
-            default_value="487",
+            default_value="975",
             description="Sensor rate used by sample-counter diagnostics.",
         ),
         DeclareLaunchArgument(
             "read_rate_hz",
-            default_value="487",
+            default_value="975",
             description="controller_manager update rate and expected ROS read rate.",
         ),
     ]

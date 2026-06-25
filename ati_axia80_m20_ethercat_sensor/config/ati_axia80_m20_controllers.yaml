@@ -1,7 +1,7 @@
 controller_manager:
   ros__parameters:
-    # Match the default Axia sample_rate_code=0 exact rate from the ATI manual.
-    update_rate: 487
+    # Match the default Axia sample_rate_code=1 exact rate from the ATI manual.
+    update_rate: 975
 
     ati_axia80_m20_broadcaster:
       type: force_torque_sensor_broadcaster/ForceTorqueSensorBroadcaster

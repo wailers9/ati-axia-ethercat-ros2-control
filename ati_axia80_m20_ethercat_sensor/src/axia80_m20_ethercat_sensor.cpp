@@ -295,7 +295,7 @@ void Axia80M20EtherCATSensor::parse_parameters_(
   parameters_.calibration_slot =
     parse_u8(optional_param(params, "calibration_slot", "0"), "calibration_slot", 1);
   parameters_.sample_rate_code =
-    parse_u8(optional_param(params, "sample_rate_code", "0"), "sample_rate_code", 3);
+    parse_u8(optional_param(params, "sample_rate_code", "1"), "sample_rate_code", 3);
   expected_sensor_rate_hz_ = std::stod(
     optional_param(
       params, "expected_sensor_rate_hz",

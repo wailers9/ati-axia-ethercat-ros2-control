@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:macro name="ati_axia80_m20_ethercat_sensor"
-               params="name:=ati_axia80_m20 parent:=tool0 master_index:=0 slave_position:=0 slave_alias:=0 runtime_diagnostic_sdo:=true runtime_diagnostic_sdo_timeout_ms:=5 sample_rate_code:=0 expected_sensor_rate_hz:=487 expected_read_rate_hz:=487">
+               params="name:=ati_axia80_m20 parent:=tool0 master_index:=0 slave_position:=0 slave_alias:=0 runtime_diagnostic_sdo:=true runtime_diagnostic_sdo_timeout_ms:=5 sample_rate_code:=1 expected_sensor_rate_hz:=975 expected_read_rate_hz:=975">
     <link name="${name}_link"/>
 
     <joint name="${name}_joint" type="fixed">

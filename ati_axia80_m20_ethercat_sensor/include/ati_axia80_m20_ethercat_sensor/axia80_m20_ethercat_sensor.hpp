@@ -43,8 +43,8 @@ struct SampleCounterDiagnostics
   uint8_t level{0};
   std::string message{"sample counter OK"};
   double elapsed_sec{1.0};
-  double expected_sensor_rate_hz{487.0};
-  double expected_read_rate_hz{487.0};
+  double expected_sensor_rate_hz{975.0};
+  double expected_read_rate_hz{975.0};
   double expected_repeats_per_sec{0.0};
   double actual_repeats_per_sec{0.0};
   double expected_skipped_samples_per_sec{0.0};
@@ -107,8 +107,8 @@ private:
   uint64_t sdo_success_{0};
   uint64_t sdo_skipped_{0};
   uint64_t sdo_failed_{0};
-  double expected_sensor_rate_hz_{487.0};
-  double expected_read_rate_hz_{487.0};
+  double expected_sensor_rate_hz_{975.0};
+  double expected_read_rate_hz_{975.0};
   mutable std::mutex sample_counter_mutex_;
   std::chrono::steady_clock::time_point sample_counter_window_start_{};
   uint64_t repeated_reads_window_{0};

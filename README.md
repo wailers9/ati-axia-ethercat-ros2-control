@@ -422,9 +422,9 @@ These parameters are configured in
 | `counts_per_torque` | `1000000` | Manual torque scale |
 | `filter_selection` | `0` | ATI low-pass filter selection in `0x7010:01` bits 4..7. `0` disables filtering; `1..8` select progressively lower cutoff frequencies from the manual table. |
 | `calibration_slot` | `0` | Calibration slot, 0..1 |
-| `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
-| `expected_sensor_rate_hz` | `487` | Sensor rate used by sample-counter diagnostics; defaults to the exact rate selected by `sample_rate_code` when omitted |
-| `expected_read_rate_hz` | `487` | Expected `read()` rate used by diagnostics; keep aligned with `controller_manager.update_rate` |
+| `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `975` | Sensor rate used by sample-counter diagnostics; defaults to the exact rate selected by `sample_rate_code` when omitted |
+| `expected_read_rate_hz` | `975` | Expected `read()` rate used by diagnostics; keep aligned with `controller_manager.update_rate` |
 | `clear_bias_on_activate` | `true` | Clear any existing bias on activation |
 | `set_bias_on_activate` | `false` | Set bias automatically on activation. Disabled by default. |
 
@@ -516,8 +516,8 @@ queue/send work. On each valid PDO sample it updates `status_code`, decodes the
 status bits, and checks `sample_counter` continuity. The check only accumulates
 counters; it does not emit per-sample warnings.
 
-The default controller read rate is `487 Hz`, matching the manual's exact
-default sensor rate (`sample_rate_code=0`). Launch-time overrides are available:
+The default controller read rate is `975 Hz`, matching the manual's exact
+1 kHz sensor setting (`sample_rate_code=1`). Launch-time overrides are available:
 
 ```bash
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \

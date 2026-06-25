@@ -276,9 +276,9 @@ ros2 service call /ati_axia80_m20/clear_bias std_srvs/srv/Trigger '{}'
 | `counts_per_torque` | `1000000` | 手动 torque 缩放比例 |
 | `filter_selection` | `0` | 传感器低通滤波选项，0..8 |
 | `calibration_slot` | `0` | 标定槽位，0..1 |
-| `sample_rate_code` | `0` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
-| `expected_sensor_rate_hz` | `487` | sample counter 诊断使用的传感器频率；未配置时按 `sample_rate_code` 精确频率推导 |
-| `expected_read_rate_hz` | `487` | 诊断使用的 ROS `read()` 频率，应与 `controller_manager.update_rate` 保持一致 |
+| `sample_rate_code` | `1` | 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz |
+| `expected_sensor_rate_hz` | `975` | sample counter 诊断使用的传感器频率；未配置时按 `sample_rate_code` 精确频率推导 |
+| `expected_read_rate_hz` | `975` | 诊断使用的 ROS `read()` 频率，应与 `controller_manager.update_rate` 保持一致 |
 | `clear_bias_on_activate` | `true` | 激活时清除已有 bias |
 | `set_bias_on_activate` | `false` | 激活时自动设置 bias，默认关闭 |
 
@@ -366,8 +366,8 @@ sample_counter_status
 PDO sample 都会更新 `status_code`、解析 status bits，并检查 `sample_counter`
 是否重复或跳变。检查函数只累计统计量，不在实时循环中直接报警。
 
-默认 `controller_manager.update_rate=487 Hz`，与手册中
-`sample_rate_code=0` 的精确采样率一致。可在启动时同时修改：
+默认 `controller_manager.update_rate=975 Hz`，与手册中
+`sample_rate_code=1` 的 1 kHz 档精确采样率一致。可在启动时同时修改：
 
 ```bash
 ros2 launch ati_axia80_m20_ethercat_sensor ati_axia80_m20_full.launch.py \

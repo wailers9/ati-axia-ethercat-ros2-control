@@ -72,7 +72,7 @@ struct Axia80DriverParameters
   // manual-defined cutoff table for the configured sample rate.
   uint8_t filter_selection{0};
   uint8_t calibration_slot{0};    // 0 or 1 for Axia80 factory calibrations.
-  uint8_t sample_rate_code{0};    // 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz.
+  uint8_t sample_rate_code{1};    // 0=487Hz, 1=975Hz, 2=1990Hz, 3=3900Hz.
 
   bool set_bias_on_activate{false};
   bool clear_bias_on_activate{true};
